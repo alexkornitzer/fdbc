@@ -1,0 +1,24 @@
+/priv/lib
+
+# Elixir
+/_build/
+/cover/
+/deps/
+/doc/
+/.fetch
+erl_crash.dump
+*.ez
+fdb-*.tar
+/tmp/
+
+# Vim
+*.sw*
+
+# Zig
+.zig-cache/
+/build-*/
+/build/
+/debug/
+/docgen_tmp/
+/release/
+zig-out/
