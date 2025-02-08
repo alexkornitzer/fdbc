@@ -184,7 +184,6 @@ const Future = struct {
         if (err != 0) {
             return handleError(env, err);
         }
-        // TODO: Use enif_alloc
         var list = erl.enif_make_list(env, 0);
         var i: usize = 0;
         while (i < count) : (i += 1) {
@@ -228,7 +227,6 @@ const Future = struct {
         if (err != 0) {
             return handleError(env, err);
         }
-        // TODO: Use enif_alloc
         var list = erl.enif_make_list(env, 0);
         var i: usize = 0;
         while (i < count) : (i += 1) {
@@ -254,7 +252,6 @@ const Future = struct {
         if (err != 0) {
             return handleError(env, err);
         }
-        // TODO: Use enif_alloc
         var list = erl.enif_make_list(env, 0);
         var i: usize = 0;
         while (i < count) : (i += 1) {
