@@ -143,6 +143,7 @@ defmodule FDBC.Network do
 
     case NIF.run_network() do
       :ok -> :ok
+      {:error, term} -> raise ErlangError, term
       {:error, code, reason} -> raise FDBC.Error, message: reason, code: code
     end
 
@@ -159,7 +160,12 @@ defmodule FDBC.Network do
   """
   @spec stop() :: :ok
   def stop() do
-    :ok = NIF.stop_network()
+    case NIF.stop_network() do
+      :ok -> :ok
+      {:error, term} -> raise ErlangError, term
+      {:error, code, reason} -> raise FDBC.Error, message: reason, code: code
+    end
+
     :ok
   end
 

@@ -95,11 +95,11 @@ fn runNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) 
     if (State.network_tid == null) {
         return erl.enif_raise_exception(env, Atoms.ENOMEM);
     }
-    const err: c_int = erl.enif_thread_create(name, State.network_tid, &networkFunc, @ptrCast(@constCast(&State.network_err)), null);
-    // TODO: Block until we confirm thread setup...
+    const err = erl.enif_thread_create(name, State.network_tid, &networkFunc, @ptrCast(@constCast(&State.network_err)), null);
     if (err != 0) {
         const atom_name = erl.erl_errno_id(err);
-        return erl.enif_make_atom(env, atom_name);
+        const term = erl.enif_make_atom(env, atom_name);
+        return erl.enif_make_tuple2(env, Atoms.ERROR, term);
     }
     return Atoms.OK;
 }
@@ -113,10 +113,11 @@ fn stopNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM)
         return handleError(env, err);
     }
     if (State.network_tid != null) {
-        // TODO: Don't return a pthread error code...
         err = erl.enif_thread_join(State.network_tid.?.*, null);
         if (err != 0) {
-            return erl.enif_make_int(env, err);
+            const atom_name = erl.erl_errno_id(err);
+            const term = erl.enif_make_atom(env, atom_name);
+            return erl.enif_make_tuple2(env, Atoms.ERROR, term);
         }
     }
     return Atoms.OK;
@@ -284,7 +285,7 @@ fn futureCallback(future: ?*fdb.FDBFuture, arg: ?*anyopaque) callconv(.C) void {
     const msg = erl.enif_make_tuple2(callback.?.env, callback.?.ref, result);
     const sent: c_int = erl.enif_send(null, &(callback.?.pid), callback.?.env, msg);
     if (sent == 0) {
-        // NOTE: An error here just means the message failed to send, either the sender or receiver are dead.
+        // An error here just means the message failed to send, either the sender or receiver are dead.
     }
     return;
 }
@@ -1146,8 +1147,7 @@ fn transactionWatch(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_N
     const future: ?*fdb.FDBFuture = fdb.fdb_transaction_watch(transaction.handle, key_name, key_name_length);
     const ft: *Future = @ptrCast(@alignCast(erl.enif_alloc_resource(Resources.FUTURE, @sizeOf(Future))));
     ft.handle = future.?;
-    // NOTE: Watchers outlive their transactions
-    ft.resource = null;
+    ft.resource = null; // Watchers outlive their transactions
     ft.type = .void;
     const term: erl.ERL_NIF_TERM = erl.enif_make_resource(env, @ptrCast(@alignCast(ft)));
     erl.enif_release_resource(@ptrCast(@alignCast(ft)));
