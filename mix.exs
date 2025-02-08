@@ -25,17 +25,24 @@ end
 defmodule FDB.MixProject do
   use Mix.Project
 
+  @source_url "https://github.com/alexkornitzer/fdbc"
+  @version "0.1.0"
+
   def project do
     [
       app: :fdbc,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       compilers: [:fdbc] ++ Mix.compilers(),
       deps: deps(),
 
+      # Hex
+      description: "An unofficial FoundationDB client for Elixir",
+      package: package(),
+
       # Docs
-      name: "FDBC",
+      name: "fdbc",
       docs: docs()
     ]
   end
@@ -56,7 +63,20 @@ defmodule FDB.MixProject do
   defp docs do
     [
       main: "FDBC",
+      source_ref: "v#{@version}",
+      source_url: @source_url,
       extras: []
+    ]
+  end
+
+  defp package() do
+    [
+      name: "fdbc",
+      build_tools: ~w(mix zig),
+      files: ~w(.formatter.exs CHANGELOG* LICENSE* README* build.zig lib mix.exs src),
+      licenses: ["MIT"],
+      links: %{"GitHub" => @source_url},
+      maintainers: ["Alex Kornitzer"]
     ]
   end
 end

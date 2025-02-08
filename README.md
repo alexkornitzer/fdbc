@@ -1,3 +1,6 @@
+[![Hex.pm](https://img.shields.io/hexpm/v/fdbc.svg)](https://hex.pm/packages/fdbc) [![Documentation](https://img.shields.io/badge/documentation-gray)](https://hexdocs.pm/fdbc/)
+
+
 An unofficial FoundationDB client for Elixir.
 
 
