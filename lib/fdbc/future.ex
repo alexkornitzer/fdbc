@@ -73,7 +73,7 @@ defmodule FDBC.Future do
     :ok =
       case NIF.future_resolve(resource, ref) do
         :ok -> :ok
-        {:error, _, reason} -> raise FDBC.Error, reason
+        {:error, code, reason} -> raise FDBC.Error, message: reason, code: code
       end
 
     receive do
@@ -109,7 +109,7 @@ defmodule FDBC.Future do
         :ok =
           case NIF.future_resolve(f.resource, ref) do
             :ok -> :ok
-            {:error, _, reason} -> raise FDBC.Error, reason
+            {:error, code, reason} -> raise FDBC.Error, message: reason, code: code
           end
 
         [ref | acc]

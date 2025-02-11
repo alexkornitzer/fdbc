@@ -89,8 +89,12 @@ defmodule FDBC.NIF do
     :erlang.nif_error("NIF database_get_client_status/1 not implemented")
   end
 
-  def tenant_create_transaction(_database) do
+  def tenant_create_transaction(_tenant) do
     :erlang.nif_error("NIF tenant_create_transaction/1 not implemented")
+  end
+
+  def tenant_get_id(_tenant) do
+    :erlang.nif_error("NIF tenant_get_id/1 not implemented")
   end
 
   def transaction_set_option(_transaction, _option) do

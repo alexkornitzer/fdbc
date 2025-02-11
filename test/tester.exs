@@ -15,7 +15,7 @@
 #      ),
 # +    "elixir": Tester(
 # +        "elixir",
-# +        "mix test/tester.exs",
+# +        "mix run test/tester.exs",
 # +        2040,
 # +        700,
 # +        MAX_API_VERSION,
@@ -31,12 +31,21 @@ defmodule Stack do
 
   def new(), do: []
 
-  def peek([]), do: nil
-  def peek([head | _]), do: head
+  def peek(stack, opts \\ [])
+  def peek([], _), do: nil
 
-  def pop([]), do: {nil, []}
+  def peek([{idx, item} | _], opts) do
+    if Keyword.get(opts, :indexed) do
+      {idx, item}
+    else
+      item
+    end
+  end
 
-  def pop([{id, %Future{} = f} | tail]) do
+  def pop(stack, opts \\ [])
+  def pop([], _), do: {nil, []}
+
+  def pop([{idx, %Future{} = f} | tail], opts) do
     item =
       try do
         case Future.resolve(f) do
@@ -51,10 +60,30 @@ defmodule Stack do
           {:binary, item}
       end
 
-    {{id, item}, tail}
+    if Keyword.get(opts, :indexed) do
+      {{idx, item}, tail}
+    else
+      {item, tail}
+    end
   end
 
-  def pop([head | tail]), do: {head, tail}
+  def pop([{idx, item} | tail], opts) do
+    if Keyword.get(opts, :indexed) do
+      {{idx, item}, tail}
+    else
+      {item, tail}
+    end
+  end
+
+  def pop_many(stack, count) do
+    {pairs, stack} =
+      Enum.reduce(1..count, {[], stack}, fn _, {pairs, stack} ->
+        {pair, stack} = pop(stack)
+        {[pair | pairs], stack}
+      end)
+
+    {Enum.reverse(pairs), stack}
+  end
 
   def push(stack, id, item), do: [{id, item} | stack]
 
@@ -90,6 +119,7 @@ defmodule Machine do
   alias FDBC.Future
   alias FDBC.KeySelector
   alias FDBC.Subspace
+  alias FDBC.Tenant
   alias FDBC.Tuple
   alias FDBC.Transaction
 
@@ -100,7 +130,8 @@ defmodule Machine do
       read_version: 0,
       processes: [],
       stack: [],
-      subspace: Subspace.new([prefix])
+      subspace: Subspace.new([prefix]),
+      tenant: nil
     }
 
     {start, stop} = Subspace.range(state.subspace)
@@ -112,34 +143,28 @@ defmodule Machine do
       |> Enum.with_index()
       |> Enum.reduce(state, fn {{_k, v}, idx}, state ->
         instruction = Tuple.unpack(v, keyed: true)
-
-        try do
-          execute(state, idx, instruction)
-        rescue
-          e in FDBC.Error ->
-            item = Tuple.pack(["ERROR", to_string(e.code)])
-            %{state | stack: Stack.push(state.stack, idx, {:binary, item})}
-        end
+        execute(state, idx, instruction)
       end)
 
     :ok = Transaction.commit(tr)
 
     for {pid, reference} <- state.processes do
       receive do
-        {:DOWN, ^reference, :process, ^pid, reason} ->
-          :normal = reason
+        {:DOWN, ^reference, :process, ^pid, :normal} ->
           :ok
       end
     end
   end
 
+  ## Data Operations
+
   def execute(machine, id, [{_, "PUSH"}, pair]) do
     %{machine | stack: Stack.push(machine.stack, id, pair)}
   end
 
-  def execute(machine, id, [{_, "DUP"}]) do
-    {_, item} = Stack.peek(machine.stack)
-    %{machine | stack: Stack.push(machine.stack, id, item)}
+  def execute(machine, _id, [{_, "DUP"}]) do
+    {id, pair} = Stack.peek(machine.stack, indexed: true)
+    %{machine | stack: Stack.push(machine.stack, id, pair)}
   end
 
   def execute(machine, _id, [{_, "EMPTY_STACK"}]) do
@@ -147,7 +172,7 @@ defmodule Machine do
   end
 
   def execute(machine, _id, [{_, "SWAP"}]) do
-    {{_, {_, idx}}, stack} = Stack.pop(machine.stack)
+    {{_, idx}, stack} = Stack.pop(machine.stack)
     %{machine | stack: Stack.swap(stack, idx)}
   end
 
@@ -157,74 +182,36 @@ defmodule Machine do
   end
 
   def execute(machine, id, [{_, "SUB"}]) do
-    {{_, {t, a}}, stack} = Stack.pop(machine.stack)
-    {{_, {^t, b}}, stack} = Stack.pop(stack)
+    {{t, a}, stack} = Stack.pop(machine.stack)
+    {{^t, b}, stack} = Stack.pop(stack)
     %{machine | stack: Stack.push(stack, id, {t, a - b})}
   end
 
   def execute(machine, id, [{_, "CONCAT"}]) do
-    {{_, a}, stack} = Stack.pop(machine.stack)
-    {{_, b}, stack} = Stack.pop(stack)
-
-    # Because one of the above could be a future due to
-    # `async_get_versionstamp` we have to check and resolve if so...
-
-    {t, a} =
-      case a do
-        %Future{} ->
-          case Future.resolve(a) do
-            nil -> {:binary, "RESULT_NOT_PRESENT"}
-            item -> {:binary, item}
-          end
-
-        _ ->
-          a
-      end
-
-    {^t, b} =
-      case b do
-        %Future{} ->
-          case Future.resolve(b) do
-            nil -> {:binary, "RESULT_NOT_PRESENT"}
-            item -> {:binary, item}
-          end
-
-        _ ->
-          b
-      end
-
+    {{t, a}, stack} = Stack.pop(machine.stack)
+    {{^t, b}, stack} = Stack.pop(stack)
     %{machine | stack: Stack.push(stack, id, {t, a <> b})}
   end
 
   def execute(machine, _id, [{_, "LOG_STACK"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
+    {{_, prefix}, stack} = Stack.pop(machine.stack)
     subspace = Subspace.new(prefix)
 
     Enum.reverse(stack)
-    |> Enum.map(fn
-      {id, item} ->
-        {id,
-         case(item) do
-           %Future{} ->
-             case Future.resolve(item) do
-               nil -> "RESULT_NOT_PRESENT"
-               item -> item
-             end
-
-           {_, item} ->
-             item
-         end}
+    |> Enum.map(fn item ->
+      {x, _} = Stack.pop([item], indexed: true)
+      x
     end)
     |> Enum.with_index()
     |> Enum.chunk_every(100)
     |> Enum.each(fn chunk ->
       FDBC.transact(machine.db, fn tr ->
-        Enum.each(chunk, fn {{id, value}, idx} ->
+        Enum.each(chunk, fn {{id, pair}, idx} ->
           key = Subspace.pack(subspace, [idx, id])
 
           val =
-            case Tuple.pack([value]) do
-              i when byte_size(i) > 4_000 -> binary_part(i, 0, 4_000)
+            case Tuple.pack([pair]) do
+              i when byte_size(i) > 40_000 -> binary_part(i, 0, 40_000)
               i -> i
             end
 
@@ -236,14 +223,16 @@ defmodule Machine do
     %{machine | stack: []}
   end
 
+  ## FoundationDB Operations
+
   def execute(machine, _id, [{_, "NEW_TRANSACTION"}]) do
-    tr = Transaction.create(machine.db)
+    tr = Transaction.create(machine.tenant || machine.db)
     Transactions.put(machine.name, tr)
     machine
   end
 
   def execute(machine, _id, [{_, "USE_TRANSACTION"}]) do
-    {{_, {_, name}}, stack} = Stack.pop(machine.stack)
+    {{_, name}, stack} = Stack.pop(machine.stack)
 
     unless Transactions.get(name) do
       tr = Transaction.create(machine.db)
@@ -254,369 +243,85 @@ defmodule Machine do
   end
 
   def execute(machine, id, [{_, "ON_ERROR"}]) do
-    {{_, {_, code}}, stack} = Stack.pop(machine.stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.on_error(tr, %Error{code: code})
-    %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+    {{_, code}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.on_error(tr, %Error{code: code})
+      %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+    end)
   end
 
-  def execute(machine, id, [{_, "GET"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    tr = Transactions.get(machine.name)
-
-    item =
-      case Transaction.get(tr, key) do
-        nil -> {:binary, "RESULT_NOT_PRESENT"}
-        item -> {:binary, item}
-      end
-
-    %{machine | stack: Stack.push(stack, id, item)}
-  end
-
-  def execute(machine, id, [{_, "GET_DATABASE"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-
-    item =
-      case FDBC.transact(machine.db, &Transaction.get(&1, key)) do
-        nil -> {:binary, "RESULT_NOT_PRESENT"}
-        item -> {:binary, item}
-      end
-
-    %{machine | stack: Stack.push(stack, id, item)}
-  end
-
-  def execute(machine, id, [{_, "GET_SNAPSHOT"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    tr = Transactions.get(machine.name)
-
-    item =
-      case Transaction.get(tr, key, snapshot: true) do
-        nil -> {:binary, "RESULT_NOT_PRESENT"}
-        item -> {:binary, item}
-      end
-
-    %{machine | stack: Stack.push(stack, id, item)}
-  end
+  def execute(machine, id, [{_, "GET"}]), do: do_get(machine, id)
+  def execute(machine, id, [{_, "GET_DATABASE"}]), do: do_get(machine, id, :database)
+  def execute(machine, id, [{_, "GET_SNAPSHOT"}]), do: do_get(machine, id, :snapshot)
+  def execute(machine, id, [{_, "GET_TENANT"}]), do: do_get(machine, id, :tenant)
 
   def execute(machine, id, [{_, "GET_ESTIMATED_RANGE_SIZE"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    tr = Transactions.get(machine.name)
-    _ = Transaction.get_estimated_range_size(tr, start, stop)
-    %{machine | stack: Stack.push(stack, id, {:binary, "GOT_ESTIMATED_RANGE_SIZE"})}
+    {pairs, stack} = Stack.pop_many(machine.stack, 2)
+    [start, stop] = Keyword.values(pairs)
+
+    catch_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      _ = Transaction.get_estimated_range_size(tr, start, stop)
+      %{machine | stack: Stack.push(stack, id, {:binary, "GOT_ESTIMATED_RANGE_SIZE"})}
+    end)
   end
 
   def execute(machine, id, [{_, "GET_RANGE_SPLIT_POINTS"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    {{_, {_, size}}, stack} = Stack.pop(stack)
-    tr = Transactions.get(machine.name)
-    _ = Transaction.get_range_split_points(tr, start, stop, size)
-    %{machine | stack: Stack.push(stack, id, {:binary, "GET_RANGE_SPLIT_POINTS"})}
+    {pairs, stack} = Stack.pop_many(machine.stack, 3)
+    [start, stop, size] = Keyword.values(pairs)
+
+    catch_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      _ = Transaction.get_range_split_points(tr, start, stop, size)
+      %{machine | stack: Stack.push(stack, id, {:binary, "GOT_RANGE_SPLIT_POINTS"})}
+    end)
   end
 
-  def execute(machine, id, [{_, "GET_KEY"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, offset}}, stack} = Stack.pop(stack)
-    {{_, {_, prefix}}, stack} = Stack.pop(stack)
+  def execute(machine, id, [{_, "GET_KEY"}]), do: do_get_key(machine, id)
+  def execute(machine, id, [{_, "GET_KEY_DATABASE"}]), do: do_get_key(machine, id, :database)
+  def execute(machine, id, [{_, "GET_KEY_SNAPSHOT"}]), do: do_get_key(machine, id, :snapshot)
+  def execute(machine, id, [{_, "GET_KEY_TENANT"}]), do: do_get_key(machine, id, :tenant)
 
-    or_equal = or_equal == 1
+  def execute(machine, id, [{_, "GET_RANGE"}]), do: do_get_range(machine, id)
+  def execute(machine, id, [{_, "GET_RANGE_DATABASE"}]), do: do_get_range(machine, id, :database)
+  def execute(machine, id, [{_, "GET_RANGE_SNAPSHOT"}]), do: do_get_range(machine, id, :snapshot)
+  def execute(machine, id, [{_, "GET_RANGE_TENANT"}]), do: do_get_range(machine, id, :tenant)
 
-    selector = KeySelector.new(key, or_equal, offset)
-    tr = Transactions.get(machine.name)
-    result = Transaction.get_key(tr, selector)
+  def execute(machine, id, [{_, "GET_RANGE_STARTS_WITH"}]), do: do_get_starts_with(machine, id)
 
-    result =
-      cond do
-        String.starts_with?(result, prefix) -> result
-        result < prefix -> prefix
-        true -> Transaction.increment_key(prefix)
-      end
+  def execute(machine, id, [{_, "GET_RANGE_STARTS_WITH_DATABASE"}]),
+    do: do_get_starts_with(machine, id, :database)
 
-    %{machine | stack: Stack.push(stack, id, {:binary, result})}
-  end
+  def execute(machine, id, [{_, "GET_RANGE_STARTS_WITH_SNAPSHOT"}]),
+    do: do_get_starts_with(machine, id, :snapshot)
 
-  def execute(machine, id, [{_, "GET_KEY_DATABASE"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, offset}}, stack} = Stack.pop(stack)
-    {{_, {_, prefix}}, stack} = Stack.pop(stack)
+  def execute(machine, id, [{_, "GET_RANGE_STARTS_WITH_TENANT"}]),
+    do: do_get_starts_with(machine, id, :tenant)
 
-    or_equal = or_equal == 1
+  def execute(machine, id, [{_, "GET_RANGE_SELECTOR"}]), do: do_get_range_selector(machine, id)
 
-    selector = KeySelector.new(key, or_equal, offset)
-    result = FDBC.transact(machine.db, &Transaction.get_key(&1, selector))
+  def execute(machine, id, [{_, "GET_RANGE_SELECTOR_DATABASE"}]),
+    do: do_get_range_selector(machine, id, :database)
 
-    result =
-      cond do
-        String.starts_with?(result, prefix) -> result
-        result < prefix -> prefix
-        true -> Transaction.increment_key(prefix)
-      end
+  def execute(machine, id, [{_, "GET_RANGE_SELECTOR_SNAPSHOT"}]),
+    do: do_get_range_selector(machine, id, :snapshot)
 
-    %{machine | stack: Stack.push(stack, id, {:binary, result})}
-  end
-
-  def execute(machine, id, [{_, "GET_KEY_SNAPSHOT"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, offset}}, stack} = Stack.pop(stack)
-    {{_, {_, prefix}}, stack} = Stack.pop(stack)
-
-    or_equal = or_equal == 1
-
-    selector = KeySelector.new(key, or_equal, offset)
-    tr = Transactions.get(machine.name)
-    result = Transaction.get_key(tr, selector, snapshot: true)
-
-    result =
-      cond do
-        String.starts_with?(result, prefix) -> result
-        result < prefix -> prefix
-        true -> Transaction.increment_key(prefix)
-      end
-
-    %{machine | stack: Stack.push(stack, id, {:binary, result})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-
-    tr = Transactions.get(machine.name)
-
-    value =
-      Transaction.get_range(tr, start, stop, limit: limit, mode: mode, reverse: reverse)
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_DATABASE"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-
-    value =
-      FDBC.transact(
-        machine.db,
-        &Transaction.get_range(&1, start, stop, limit: limit, mode: mode, reverse: reverse)
-      )
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_SNAPSHOT"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-
-    tr = Transactions.get(machine.name)
-
-    value =
-      Transaction.get_range(tr, start, stop,
-        limit: limit,
-        mode: mode,
-        reverse: reverse,
-        snapshot: true
-      )
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_STARTS_WITH"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-
-    tr = Transactions.get(machine.name)
-
-    value =
-      Transaction.get_starts_with(tr, prefix, limit: limit, mode: mode, reverse: reverse)
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_STARTS_WITH_DATABASE"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-
-    value =
-      FDBC.transact(
-        machine.db,
-        &Transaction.get_starts_with(&1, prefix, limit: limit, mode: mode, reverse: reverse)
-      )
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_STARTS_WITH_SNAPSHOT"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-
-    tr = Transactions.get(machine.name)
-
-    value =
-      Transaction.get_starts_with(tr, prefix,
-        limit: limit,
-        mode: mode,
-        reverse: reverse,
-        snapshot: true
-      )
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_SELECTOR"}]) do
-    {{_, {_, start_key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, start_or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, start_offset}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_key}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_offset}}, stack} = Stack.pop(stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-    {{_, {_, prefix}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-    start_or_equal = start_or_equal == 1
-    stop_or_equal = stop_or_equal == 1
-
-    start = KeySelector.new(start_key, start_or_equal, start_offset)
-    stop = KeySelector.new(stop_key, stop_or_equal, stop_offset)
-
-    tr = Transactions.get(machine.name)
-
-    value =
-      Transaction.get_range(tr, start, stop, limit: limit, mode: mode, reverse: reverse)
-      |> Enum.filter(fn {k, _v} -> String.starts_with?(k, prefix) end)
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_SELECTOR_DATABASE"}]) do
-    {{_, {_, start_key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, start_or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, start_offset}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_key}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_offset}}, stack} = Stack.pop(stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-    {{_, {_, prefix}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-    start_or_equal = start_or_equal == 1
-    stop_or_equal = stop_or_equal == 1
-
-    start = KeySelector.new(start_key, start_or_equal, start_offset)
-    stop = KeySelector.new(stop_key, stop_or_equal, stop_offset)
-
-    value =
-      FDBC.transact(
-        machine.db,
-        &Transaction.get_range(&1, start, stop, limit: limit, mode: mode, reverse: reverse)
-      )
-      |> Enum.filter(fn {k, _v} -> String.starts_with?(k, prefix) end)
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
-
-  def execute(machine, id, [{_, "GET_RANGE_SELECTOR_SNAPSHOT"}]) do
-    {{_, {_, start_key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, start_or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, start_offset}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_key}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_or_equal}}, stack} = Stack.pop(stack)
-    {{_, {_, stop_offset}}, stack} = Stack.pop(stack)
-    {{_, {_, limit}}, stack} = Stack.pop(stack)
-    {{_, {_, reverse}}, stack} = Stack.pop(stack)
-    {{_, {_, mode}}, stack} = Stack.pop(stack)
-    {{_, {_, prefix}}, stack} = Stack.pop(stack)
-
-    mode = int_to_mode(mode)
-    reverse = reverse == 1
-    start_or_equal = start_or_equal == 1
-    stop_or_equal = stop_or_equal == 1
-
-    start = KeySelector.new(start_key, start_or_equal, start_offset)
-    stop = KeySelector.new(stop_key, stop_or_equal, stop_offset)
-
-    tr = Transactions.get(machine.name)
-
-    value =
-      Transaction.get_range(tr, start, stop,
-        limit: limit,
-        mode: mode,
-        reverse: reverse,
-        snapshot: true
-      )
-      |> Enum.filter(fn {k, _v} -> String.starts_with?(k, prefix) end)
-      |> Enum.flat_map(fn {k, v} -> [k, v] end)
-      |> Tuple.pack()
-
-    %{machine | stack: Stack.push(stack, id, {:binary, value})}
-  end
+  def execute(machine, id, [{_, "GET_RANGE_SELECTOR_TENANT"}]),
+    do: do_get_range_selector(machine, id, :tenant)
 
   def execute(machine, id, [{_, "GET_READ_VERSION"}]) do
-    tr = Transactions.get(machine.name)
-    version = Transaction.get_read_version(tr)
+    catch_error(machine, id, machine.stack, fn ->
+      tr = Transactions.get(machine.name)
+      version = Transaction.get_read_version(tr)
 
-    %{
-      machine
-      | stack: Stack.push(machine.stack, id, {:binary, "GOT_READ_VERSION"}),
-        read_version: version
-    }
+      %{
+        machine
+        | stack: Stack.push(machine.stack, id, {:binary, "GOT_READ_VERSION"}),
+          read_version: version
+      }
+    end)
   end
 
   def execute(machine, id, [{_, "GET_READ_VERSION_SNAPSHOT"}]) do
@@ -625,131 +330,105 @@ defmodule Machine do
   end
 
   def execute(machine, id, [{_, "GET_VERSIONSTAMP"}]) do
-    tr = Transactions.get(machine.name)
-    future = Transaction.async_get_versionstamp(tr)
-    %{machine | stack: Stack.push(machine.stack, id, future)}
+    catch_error(machine, id, machine.stack, fn ->
+      tr = Transactions.get(machine.name)
+      future = Transaction.async_get_versionstamp(tr)
+      %{machine | stack: Stack.push(machine.stack, id, future)}
+    end)
   end
 
-  def execute(machine, _id, [{_, "SET"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, value}}, stack} = Stack.pop(stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.set(tr, key, value)
-    %{machine | stack: stack}
+  def execute(machine, id, [{_, "SET"}]), do: do_set(machine, id)
+  def execute(machine, id, [{_, "SET_DATABASE"}]), do: do_set(machine, id, :database)
+  def execute(machine, id, [{_, "SET_TENANT"}]), do: do_set(machine, id, :tenant)
+
+  def execute(machine, id, [{_, "SET_READ_VERSION"}]) do
+    catch_error(machine, id, machine.stack, fn ->
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.set_read_version(tr, machine.read_version)
+      machine
+    end)
   end
 
-  def execute(machine, id, [{_, "SET_DATABASE"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, value}}, stack} = Stack.pop(stack)
-    :ok = FDBC.transact(machine.db, &Transaction.set(&1, key, value))
-    %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
-  end
+  def execute(machine, id, [{_, "CLEAR"}]), do: do_clear(machine, id)
+  def execute(machine, id, [{_, "CLEAR_DATABASE"}]), do: do_clear(machine, id, :database)
+  def execute(machine, id, [{_, "CLEAR_TENANT"}]), do: do_clear(machine, id, :tenant)
 
-  def execute(machine, _id, [{_, "SET_READ_VERSION"}]) do
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.set_read_version(tr, machine.read_version)
-    machine
-  end
+  def execute(machine, id, [{_, "CLEAR_RANGE"}]), do: do_clear_range(machine, id)
 
-  def execute(machine, _id, [{_, "CLEAR"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.clear(tr, key)
-    %{machine | stack: stack}
-  end
+  def execute(machine, id, [{_, "CLEAR_RANGE_DATABASE"}]),
+    do: do_clear_range(machine, id, :database)
 
-  def execute(machine, id, [{_, "CLEAR_DATABASE"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    :ok = FDBC.transact(machine.db, &Transaction.clear(&1, key))
-    %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
-  end
+  def execute(machine, id, [{_, "CLEAR_RANGE_TENANT"}]), do: do_clear_range(machine, id, :tenant)
 
-  def execute(machine, _id, [{_, "CLEAR_RANGE"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.clear_range(tr, start, stop)
-    %{machine | stack: stack}
-  end
+  def execute(machine, id, [{_, "CLEAR_RANGE_STARTS_WITH"}]),
+    do: do_clear_starts_with(machine, id)
 
-  def execute(machine, id, [{_, "CLEAR_RANGE_DATABASE"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    :ok = FDBC.transact(machine.db, &Transaction.clear_range(&1, start, stop))
-    %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
-  end
+  def execute(machine, id, [{_, "CLEAR_RANGE_STARTS_WITH_DATABASE"}]),
+    do: do_clear_starts_with(machine, id, :database)
 
-  def execute(machine, _id, [{_, "CLEAR_RANGE_STARTS_WITH"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.clear_starts_with(tr, prefix)
-    %{machine | stack: stack}
-  end
+  def execute(machine, id, [{_, "CLEAR_RANGE_STARTS_WITH_TENANT"}]),
+    do: do_clear_starts_with(machine, id, :tenant)
 
-  def execute(machine, id, [{_, "CLEAR_RANGE_STARTS_WITH_DATABASE"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
-    :ok = FDBC.transact(machine.db, &Transaction.clear_starts_with(&1, prefix))
-    %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
-  end
-
-  def execute(machine, _id, [{_, "ATOMIC_OP"}]) do
-    {{_, {_, op}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, key}}, stack} = Stack.pop(stack)
-    {{_, {_, value}}, stack} = Stack.pop(stack)
-    op = String.downcase(op) |> String.to_atom()
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.atomic_op(tr, op, key, value)
-    %{machine | stack: stack}
-  end
-
-  def execute(machine, id, [{_, "ATOMIC_OP_DATABASE"}]) do
-    {{_, {_, op}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, key}}, stack} = Stack.pop(stack)
-    {{_, {_, value}}, stack} = Stack.pop(stack)
-    :ok = FDBC.transact(machine.db, &Transaction.atomic_op(&1, op, key, value))
-    %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
-  end
+  def execute(machine, id, [{_, "ATOMIC_OP"}]), do: do_atomic_op(machine, id)
+  def execute(machine, id, [{_, "ATOMIC_OP_DATABASE"}]), do: do_atomic_op(machine, id, :database)
+  def execute(machine, id, [{_, "ATOMIC_OP_TENANT"}]), do: do_atomic_op(machine, id, :tenant)
 
   def execute(machine, id, [{_, "READ_CONFLICT_RANGE"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.add_conflict_range(tr, start, stop, :read)
-    %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_RANGE"})}
+    {pairs, stack} = Stack.pop_many(machine.stack, 2)
+    [start, stop] = Keyword.values(pairs)
+
+    catch_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.add_conflict_range(tr, start, stop, :read)
+      %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_RANGE"})}
+    end)
   end
 
   def execute(machine, id, [{_, "WRITE_CONFLICT_RANGE"}]) do
-    {{_, {_, start}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, stop}}, stack} = Stack.pop(stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.add_conflict_range(tr, start, stop, :write)
-    %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_RANGE"})}
+    {pairs, stack} = Stack.pop_many(machine.stack, 2)
+    [start, stop] = Keyword.values(pairs)
+
+    catch_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.add_conflict_range(tr, start, stop, :write)
+      %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_RANGE"})}
+    end)
   end
 
   def execute(machine, id, [{_, "READ_CONFLICT_KEY"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.add_conflict_key(tr, key, :read)
-    %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_KEY"})}
+    {{_, key}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.add_conflict_key(tr, key, :read)
+      %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_KEY"})}
+    end)
   end
 
   def execute(machine, id, [{_, "WRITE_CONFLICT_KEY"}]) do
-    {{_, {_, key}}, stack} = Stack.pop(machine.stack)
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.add_conflict_key(tr, key, :write)
-    %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_KEY"})}
+    {{_, key}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.add_conflict_key(tr, key, :write)
+      %{machine | stack: Stack.push(stack, id, {:binary, "SET_CONFLICT_KEY"})}
+    end)
   end
 
-  def execute(machine, _id, [{_, "DISABLE_WRITE_CONFLICT"}]) do
-    tr = Transactions.get(machine.name)
-    Transaction.change(tr, next_write_no_write_conflict_range: true)
-    machine
+  def execute(machine, id, [{_, "DISABLE_WRITE_CONFLICT"}]) do
+    catch_error(machine, id, machine.stack, fn ->
+      tr = Transactions.get(machine.name)
+      Transaction.change(tr, next_write_no_write_conflict_range: true)
+      machine
+    end)
   end
 
   def execute(machine, id, [{_, "COMMIT"}]) do
-    tr = Transactions.get(machine.name)
-    :ok = Transaction.commit(tr)
-    %{machine | stack: Stack.push(machine.stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+    catch_error(machine, id, machine.stack, fn ->
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.commit(tr)
+      %{machine | stack: Stack.push(machine.stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+    end)
   end
 
   def execute(machine, _id, [{_, "RESET"}]) do
@@ -765,56 +444,54 @@ defmodule Machine do
   end
 
   def execute(machine, id, [{_, "GET_COMMITTED_VERSION"}]) do
-    tr = Transactions.get(machine.name)
-    version = Transaction.get_committed_version(tr)
+    catch_error(machine, id, machine.stack, fn ->
+      tr = Transactions.get(machine.name)
+      version = Transaction.get_committed_version(tr)
 
-    %{
-      machine
-      | read_version: version,
-        stack: Stack.push(machine.stack, id, {:binary, "GOT_COMMITTED_VERSION"})
-    }
+      %{
+        machine
+        | read_version: version,
+          stack: Stack.push(machine.stack, id, {:binary, "GOT_COMMITTED_VERSION"})
+      }
+    end)
   end
 
   def execute(machine, id, [{_, "GET_APPROXIMATE_SIZE"}]) do
-    tr = Transactions.get(machine.name)
-    _ = Transaction.get_approximate_size(tr)
-    %{machine | stack: Stack.push(machine.stack, id, {:binary, "GOT_APPROXIMATE_SIZE"})}
+    catch_error(machine, id, machine.stack, fn ->
+      tr = Transactions.get(machine.name)
+      _ = Transaction.get_approximate_size(tr)
+      %{machine | stack: Stack.push(machine.stack, id, {:binary, "GOT_APPROXIMATE_SIZE"})}
+    end)
   end
 
   def execute(machine, _id, [{_, "WAIT_FUTURE"}]) do
     # Future resolution is handled in pop
-    {{id, item}, stack} = Stack.pop(machine.stack)
-    %{machine | stack: Stack.push(stack, id, item)}
+    {{id, pair}, stack} = Stack.pop(machine.stack, indexed: true)
+    %{machine | stack: Stack.push(stack, id, pair)}
   end
 
+  ## Tuple Operations
+
   def execute(machine, id, [{_, "TUPLE_PACK"}]) do
-    {{_, {_, count}}, stack} = Stack.pop(machine.stack)
-
-    {pairs, stack} =
-      Enum.reduce(0..(count - 1), {[], stack}, fn _, {pairs, stack} ->
-        {{_, pair}, stack} = Stack.pop(stack)
-        {[pair | pairs], stack}
-      end)
-
-    item = Enum.reverse(pairs) |> Tuple.pack()
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {pairs, stack} = Stack.pop_many(stack, count)
+    item = Tuple.pack(pairs, keyed: true)
     %{machine | stack: Stack.push(stack, id, {:binary, item})}
   end
 
   def execute(machine, id, [{_, "TUPLE_PACK_WITH_VERSIONSTAMP"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
-    {{_, {_, count}}, stack} = Stack.pop(stack)
-
-    {pairs, stack} =
-      Enum.reduce(0..(count - 1), {[], stack}, fn _, {pairs, stack} ->
-        {{_, pair}, stack} = Stack.pop(stack)
-        {[pair | pairs], stack}
-      end)
+    {pairs, stack} = Stack.pop_many(machine.stack, 2)
+    [prefix, count] = Keyword.values(pairs)
+    {pairs, stack} = Stack.pop_many(stack, count)
 
     {item, stack} =
       try do
-        item = Subspace.new(prefix) |> Subspace.pack(Enum.reverse(pairs), versionstamp: true)
-        stack = Stack.push(stack, id, {:binary, item})
-        {"OK", stack}
+        item =
+          Subspace.new(prefix)
+          |> Subspace.pack(pairs, keyed: true, versionstamp: true)
+
+        stack = Stack.push(stack, id, {:binary, "OK"})
+        {item, stack}
       rescue
         e in ArgumentError ->
           case e.message do
@@ -833,7 +510,7 @@ defmodule Machine do
   end
 
   def execute(machine, id, [{_, "TUPLE_UNPACK"}]) do
-    {{_, {_, item}}, stack} = Stack.pop(machine.stack)
+    {{_, item}, stack} = Stack.pop(machine.stack)
 
     stack =
       Tuple.unpack(item, keyed: true)
@@ -846,30 +523,20 @@ defmodule Machine do
   end
 
   def execute(machine, id, [{_, "TUPLE_RANGE"}]) do
-    {{_, {_, count}}, stack} = Stack.pop(machine.stack)
-
-    {pairs, stack} =
-      Enum.reduce(0..(count - 1), {[], stack}, fn _, {pairs, stack} ->
-        {{_, pair}, stack} = Stack.pop(stack)
-        {[pair | pairs], stack}
-      end)
-
-    {start, stop} = Enum.reverse(pairs) |> Tuple.range()
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {pairs, stack} = Stack.pop_many(stack, count)
+    {start, stop} = Tuple.range(pairs, keyed: true)
     stack = Stack.push(stack, id, {:binary, start})
     %{machine | stack: Stack.push(stack, id, {:binary, stop})}
   end
 
   def execute(machine, id, [{_, "TUPLE_SORT"}]) do
-    {{_, {_, count}}, stack} = Stack.pop(machine.stack)
-
-    {items, stack} =
-      Enum.reduce(0..(count - 1), {[], stack}, fn _, {items, stack} ->
-        {{_, {_, item}}, stack} = Stack.pop(stack)
-        {[item | items], stack}
-      end)
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {pairs, stack} = Stack.pop_many(stack, count)
 
     stack =
-      Enum.sort(items)
+      Keyword.values(pairs)
+      |> Enum.sort()
       |> Enum.reduce(stack, fn item, stack ->
         Stack.push(stack, id, {:binary, item})
       end)
@@ -878,37 +545,71 @@ defmodule Machine do
   end
 
   def execute(machine, id, [{_, "ENCODE_FLOAT"}]) do
-    {{_, {_, item}}, stack} = Stack.pop(machine.stack)
-    <<item::float-big-32>> = item
+    {{_, item}, stack} = Stack.pop(machine.stack)
+
+    item =
+      case item do
+        <<0::1, 0xFF::8, 0::23>> -> :infinity
+        <<1::1, 0xFF::8, 0::23>> -> :neg_infinity
+        <<_::1, 0xFF::8, _::23>> -> :nan
+        <<item::float-big-32>> -> item
+      end
+
     %{machine | stack: Stack.push(stack, id, {:float, item})}
   end
 
   def execute(machine, id, [{_, "ENCODE_DOUBLE"}]) do
-    {{_, {_, item}}, stack} = Stack.pop(machine.stack)
-    <<item::float-big-64>> = item
+    {{_, item}, stack} = Stack.pop(machine.stack)
+
+    item =
+      case item do
+        <<0::1, 0x7FF::11, 0::52>> -> :infinity
+        <<1::1, 0x7FF::11, 0::52>> -> :neg_infinity
+        <<_::1, 0x7FF::11, _::52>> -> :nan
+        <<item::float-big-64>> -> item
+      end
+
     %{machine | stack: Stack.push(stack, id, {:double, item})}
   end
 
   def execute(machine, id, [{_, "DECODE_FLOAT"}]) do
-    {{_, {_, item}}, stack} = Stack.pop(machine.stack)
-    <<item::float-big-32>> = item
+    {{_, item}, stack} = Stack.pop(machine.stack)
+
+    item =
+      case item do
+        :infinity -> <<0::1, 0xFF::8, 0::1, 0::22>>
+        :neg_infinity -> <<1::1, 0xFF::8, 0::1, 0::22>>
+        :nan -> <<0::1, 0xFF::8, 1::1, 0::22>>
+        _ -> <<item::float-big-32>>
+      end
+
     %{machine | stack: Stack.push(stack, id, {:binary, item})}
   end
 
   def execute(machine, id, [{_, "DECODE_DOUBLE"}]) do
-    {{_, {_, item}}, stack} = Stack.pop(machine.stack)
-    <<item::float-big-64>> = item
+    {{_, item}, stack} = Stack.pop(machine.stack)
+
+    item =
+      case item do
+        :infinity -> <<0::1, 0x7FF::11, 0::1, 0::51>>
+        :neg_infinity -> <<1::1, 0x7FF::11, 0::1, 0::51>>
+        :nan -> <<0::1, 0x7FF::11, 1::1, 0::51>>
+        _ -> <<item::float-big-64>>
+      end
+
     %{machine | stack: Stack.push(stack, id, {:binary, item})}
   end
 
+  ## Thread Operations
+
   def execute(machine, _id, [{_, "START_THREAD"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
+    {{_, prefix}, stack} = Stack.pop(machine.stack)
     result = spawn_monitor(fn -> Machine.start(machine.db, prefix) end)
     %{machine | processes: [result | machine.processes], stack: stack}
   end
 
   def execute(machine, id, [{_, "WAIT_EMPTY"}]) do
-    {{_, {_, prefix}}, stack} = Stack.pop(machine.stack)
+    {{_, prefix}, stack} = Stack.pop(machine.stack)
 
     FDBC.transact(machine.db, fn tr ->
       unless Transaction.get_starts_with(tr, prefix) == [] do
@@ -921,13 +622,327 @@ defmodule Machine do
     %{machine | stack: Stack.push(stack, id, {:binary, "WAITED_FOR_EMPTY"})}
   end
 
+  ## Miscellaneous
+
   def execute(machine, _id, [{_, "UNIT_TESTS"}]) do
+    # Ignored as these are achieved with `mix test`
     machine
+  end
+
+  ## Tenant Operations
+
+  def execute(machine, id, [{_, "TENANT_CREATE"}]) do
+    {{_, name}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      :ok = Tenant.create(machine.db, name)
+      %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+    end)
+  end
+
+  def execute(machine, id, [{_, "TENANT_DELETE"}]) do
+    {{_, name}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      :ok = Tenant.delete(machine.db, name)
+      %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+    end)
+  end
+
+  def execute(machine, id, [{_, "TENANT_SET_ACTIVE"}]) do
+    {{_, name}, stack} = Stack.pop(machine.stack)
+
+    tenant = Tenant.open(machine.db, name)
+    machine = %{machine | tenant: tenant}
+
+    catch_error(machine, id, stack, fn ->
+      _id = Tenant.get_id(tenant)
+      %{machine | stack: Stack.push(stack, id, {:binary, "SET_ACTIVE_TENANT"})}
+    end)
+  end
+
+  def execute(machine, _id, [{_, "TENANT_CLEAR_ACTIVE"}]) do
+    %{machine | tenant: nil}
+  end
+
+  def execute(machine, id, [{_, "TENANT_LIST"}]) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 3)
+    [start, stop, limit] = Keyword.values(pairs)
+    limit = clamp_limit(limit)
+
+    catch_error(machine, id, stack, fn ->
+      value =
+        FDBC.transact(machine.db, fn tr ->
+          Tenant.list(tr, start, stop, limit: limit)
+          |> Enum.map(fn {k, _} -> k end)
+          |> Tuple.pack()
+        end)
+
+      %{machine | stack: Stack.push(stack, id, {:binary, value})}
+    end)
+  end
+
+  def execute(machine, id, [{_, "TENANT_GET_ID"}]) do
+    catch_error(machine, id, machine.stack, fn ->
+      item =
+        case machine.tenant do
+          nil ->
+            "NO_ACTIVE_TENANT"
+
+          tenant ->
+            _id = Tenant.get_id(tenant)
+            "GOT_TENANT_ID"
+        end
+
+      %{machine | stack: Stack.push(machine.stack, id, {:binary, item})}
+    end)
   end
 
   ## Helpers
 
-  defp int_to_mode(value) do
+  def do_atomic_op(machine, id, kind \\ nil) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 3)
+    [op, key, value] = Keyword.values(pairs)
+    op = op |> String.downcase() |> String.to_atom()
+
+    catch_error(machine, id, stack, fn ->
+      {fun, _} = transactor(machine, kind)
+      :ok = fun.(&Transaction.atomic_op(&1, op, key, value))
+
+      if kind do
+        %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+      else
+        %{machine | stack: stack}
+      end
+    end)
+  end
+
+  def do_clear(machine, id, kind \\ nil) do
+    {{_, key}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      {fun, _} = transactor(machine, kind)
+      :ok = fun.(&Transaction.clear(&1, key))
+
+      if kind do
+        %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+      else
+        %{machine | stack: stack}
+      end
+    end)
+  end
+
+  def do_clear_range(machine, id, kind \\ nil) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 2)
+    [start, stop] = Keyword.values(pairs)
+
+    catch_error(machine, id, stack, fn ->
+      {fun, _} = transactor(machine, kind)
+      :ok = fun.(&Transaction.clear_range(&1, start, stop))
+
+      if kind do
+        %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+      else
+        %{machine | stack: stack}
+      end
+    end)
+  end
+
+  def do_clear_starts_with(machine, id, kind \\ nil) do
+    {{_, prefix}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      {fun, _} = transactor(machine, kind)
+      :ok = fun.(&Transaction.clear_starts_with(&1, prefix))
+
+      if kind do
+        %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+      else
+        %{machine | stack: stack}
+      end
+    end)
+  end
+
+  defp do_get(machine, id, kind \\ nil) do
+    {{_, key}, stack} = Stack.pop(machine.stack)
+
+    catch_error(machine, id, stack, fn ->
+      {fun, opts} = transactor(machine, kind)
+      result = fun.(&Transaction.get(&1, key, opts))
+
+      item =
+        if result do
+          {:binary, result}
+        else
+          {:binary, "RESULT_NOT_PRESENT"}
+        end
+
+      %{machine | stack: Stack.push(stack, id, item)}
+    end)
+  end
+
+  defp do_get_key(machine, id, kind \\ nil) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 4)
+    [key, or_equal, offset, prefix] = Keyword.values(pairs)
+
+    or_equal = or_equal == 1
+    selector = KeySelector.new(key, or_equal, offset)
+
+    catch_error(machine, id, stack, fn ->
+      {fun, opts} = transactor(machine, kind)
+      result = fun.(&Transaction.get_key(&1, selector, opts))
+
+      item =
+        cond do
+          String.starts_with?(result, prefix) -> result
+          result < prefix -> prefix
+          true -> Transaction.increment_key(prefix)
+        end
+
+      %{machine | stack: Stack.push(stack, id, {:binary, item})}
+    end)
+  end
+
+  defp do_get_range(machine, id, kind \\ nil) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 5)
+    [start, stop, limit, reverse, mode] = Keyword.values(pairs)
+
+    limit = clamp_limit(limit)
+    mode = range_int_to_mode(mode)
+    reverse = reverse == 1
+
+    catch_error(machine, id, stack, fn ->
+      {fun, opts} = transactor(machine, kind)
+
+      value =
+        fun.(
+          &Transaction.get_range(
+            &1,
+            start,
+            stop,
+            opts ++ [limit: limit, mode: mode, reverse: reverse]
+          )
+        )
+
+      value =
+        value
+        |> Enum.flat_map(fn {k, v} -> [k, v] end)
+        |> Tuple.pack()
+
+      %{machine | stack: Stack.push(stack, id, {:binary, value})}
+    end)
+  end
+
+  defp do_get_range_selector(machine, id, kind \\ nil) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 10)
+
+    [
+      start_key,
+      start_or_equal,
+      start_offset,
+      stop_key,
+      stop_or_equal,
+      stop_offset,
+      limit,
+      reverse,
+      mode,
+      prefix
+    ] = Keyword.values(pairs)
+
+    limit = clamp_limit(limit)
+    mode = range_int_to_mode(mode)
+    reverse = reverse == 1
+    start_or_equal = start_or_equal == 1
+    stop_or_equal = stop_or_equal == 1
+
+    start = KeySelector.new(start_key, start_or_equal, start_offset)
+    stop = KeySelector.new(stop_key, stop_or_equal, stop_offset)
+
+    catch_error(machine, id, stack, fn ->
+      {fun, opts} = transactor(machine, kind)
+
+      value =
+        fun.(
+          &Transaction.get_range(
+            &1,
+            start,
+            stop,
+            opts ++ [limit: limit, mode: mode, reverse: reverse]
+          )
+        )
+        |> Enum.filter(fn {k, _v} -> String.starts_with?(k, prefix) end)
+        |> Enum.flat_map(fn {k, v} -> [k, v] end)
+        |> Tuple.pack()
+
+      %{machine | stack: Stack.push(stack, id, {:binary, value})}
+    end)
+  end
+
+  defp do_get_starts_with(machine, id, kind \\ nil) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 4)
+    [prefix, limit, reverse, mode] = Keyword.values(pairs)
+
+    mode = range_int_to_mode(mode)
+    reverse = reverse == 1
+
+    catch_error(machine, id, stack, fn ->
+      {fun, opts} = transactor(machine, kind)
+
+      value =
+        fun.(
+          &Transaction.get_starts_with(
+            &1,
+            prefix,
+            opts ++ [limit: limit, mode: mode, reverse: reverse]
+          )
+        )
+        |> Enum.flat_map(fn {k, v} -> [k, v] end)
+        |> Tuple.pack()
+
+      %{machine | stack: Stack.push(stack, id, {:binary, value})}
+    end)
+  end
+
+  defp do_set(machine, id, kind \\ nil) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 2)
+    [key, value] = Keyword.values(pairs)
+
+    catch_error(machine, id, stack, fn ->
+      {fun, _} = transactor(machine, kind)
+      :ok = fun.(&Transaction.set(&1, key, value))
+
+      if kind do
+        %{machine | stack: Stack.push(stack, id, {:binary, "RESULT_NOT_PRESENT"})}
+      else
+        %{machine | stack: stack}
+      end
+    end)
+  end
+
+  defp catch_error(machine, id, stack, fun) do
+    try do
+      fun.()
+    rescue
+      e in FDBC.Error ->
+        item = Tuple.pack(["ERROR", to_string(e.code)])
+        %{machine | stack: Stack.push(stack, id, {:binary, item})}
+    end
+  end
+
+  defp clamp_limit(limit) do
+    # We don't clamp because the Python implementation relies on the overflow
+    # being treated as 0... and that is the gold standard that output is
+    # compared with... eurgh...
+    <<truncated::integer-32>> = <<limit::integer-32>>
+
+    cond do
+      truncated < -0x7FFFFFFF -> -0x7FFFFFFF
+      truncated > 0x7FFFFFFF -> -0x7FFFFFFF
+      true -> truncated
+    end
+  end
+
+  defp range_int_to_mode(value) do
     case value do
       -2 -> :want_all
       -1 -> :iterator
@@ -936,6 +951,22 @@ defmodule Machine do
       2 -> :medium
       3 -> :large
       4 -> :serial
+    end
+  end
+
+  defp transactor(machine, kind) do
+    case kind do
+      nil ->
+        {fn action -> action.(Transactions.get(machine.name)) end, []}
+
+      :database ->
+        {fn action -> FDBC.transact(machine.db, &action.(&1)) end, []}
+
+      :snapshot ->
+        {fn action -> action.(Transactions.get(machine.name)) end, [snapshot: true]}
+
+      :tenant ->
+        {fn action -> FDBC.transact(machine.tenant || machine.db, &action.(&1)) end, []}
     end
   end
 end

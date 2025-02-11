@@ -38,6 +38,16 @@ defmodule FDBC.TupleTest do
 
     test "pack float" do
       assert "\x20\x3d\xd7\xff\xff" == Tuple.pack([-42.0])
+
+      assert " \xff\x80\x00\x00" == Tuple.pack([{:float, :infinity}])
+      assert " \x00\x7f\xff\xff" == Tuple.pack([{:float, :neg_infinity}])
+      assert " \xff\xC0\x00\x00" == Tuple.pack([{:float, :nan}])
+      assert " \x00?\xff\xff" == Tuple.pack([{:float, :neg_nan}])
+
+      assert "!\xff\xf0\x00\x00\x00\x00\x00\x00" == Tuple.pack([{:double, :infinity}])
+      assert "!\x00\x0f\xff\xff\xff\xff\xff\xff" == Tuple.pack([{:double, :neg_infinity}])
+      assert "!\xFF\xF8\0\0\0\0\0\0" == Tuple.pack([{:double, :nan}])
+      assert "!\x00\a\xff\xff\xff\xff\xff\xff" == Tuple.pack([{:double, :neg_nan}])
     end
 
     test "pack false" do
@@ -97,6 +107,16 @@ defmodule FDBC.TupleTest do
 
     test "unpack float" do
       assert [-42.0] == Tuple.unpack("\x20\x3d\xd7\xff\xff")
+
+      assert [:infinity] == Tuple.unpack(" \xff\x80\x00\x00")
+      assert [:neg_infinity] == Tuple.unpack(" \x00\x7f\xff\xff")
+      assert [:nan] == Tuple.unpack(" \xff\xc0\x00\x00")
+      assert [:neg_nan] == Tuple.unpack(" \x00?\xff\xff")
+
+      assert [:infinity] == Tuple.unpack("!\xff\xf0\x00\x00\x00\x00\x00\x00")
+      assert [:neg_infinity] == Tuple.unpack("!\x00\x0f\xff\xff\xff\xff\xff\xff")
+      assert [:nan] == Tuple.unpack("!\xff\xf8\x00\x00\x00\x00\x00\x00")
+      assert [:neg_nan] == Tuple.unpack("!\x00\a\xff\xff\xff\xff\xff\xff")
     end
 
     test "unpack false" do

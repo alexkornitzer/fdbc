@@ -263,7 +263,7 @@ defmodule FDBC.Tuple do
 
     {value, encoded} =
       case encoded do
-        <<value::binary-size(^length), encoded>> -> {value, encoded}
+        <<value::binary-size(^length), encoded::binary>> -> {value, encoded}
         <<value::binary-size(^length)>> -> {value, <<>>}
       end
 
@@ -357,7 +357,7 @@ defmodule FDBC.Tuple do
   defp decode(<<0x1D, length::integer-size(8)>> <> encoded, _) do
     {value, encoded} =
       case encoded do
-        <<value::binary-size(^length), encoded>> -> {value, encoded}
+        <<value::binary-size(^length), encoded::binary>> -> {value, encoded}
         <<value::binary-size(^length)>> -> {value, <<>>}
       end
 
@@ -365,12 +365,28 @@ defmodule FDBC.Tuple do
   end
 
   defp decode(<<@float_typecode, value::binary-size(4)>> <> encoded, _) do
-    <<value::float-32>> = do_float_decode(value)
+    value =
+      case do_float_decode(value) do
+        <<0::size(1), 0xFF::size(8), 0::size(23)>> -> :infinity
+        <<1::size(1), 0xFF::size(8), 0::size(23)>> -> :neg_infinity
+        <<0::size(1), 0xFF::size(8), _::size(23)>> -> :nan
+        <<1::size(1), 0xFF::size(8), _::size(23)>> -> :neg_nan
+        <<value::float-32>> -> value
+      end
+
     {{:float, value}, encoded}
   end
 
   defp decode(<<@double_typecode, value::binary-size(8)>> <> encoded, _) do
-    <<value::float-64>> = do_float_decode(value)
+    value =
+      case do_float_decode(value) do
+        <<0::size(1), 0x7FF::size(11), 0::size(52)>> -> :infinity
+        <<1::size(1), 0x7FF::size(11), 0::size(52)>> -> :neg_infinity
+        <<0::size(1), 0x7FF::size(11), _::size(52)>> -> :nan
+        <<1::size(1), 0x7FF::size(11), _::size(52)>> -> :neg_nan
+        <<value::float-64>> -> value
+      end
+
     {{:double, value}, encoded}
   end
 
@@ -442,7 +458,7 @@ defmodule FDBC.Tuple do
           _ ->
             opts = Keyword.put(opts, :prefix, prefix <> key)
             {e, o} = encode(x, state, opts)
-            {key <> e, state ++ o}
+            {key <> e, o}
         end
       end)
 
@@ -535,8 +551,40 @@ defmodule FDBC.Tuple do
     {encoded, state}
   end
 
+  defp encode({:float, :infinity}, state, _) do
+    {<<@float_typecode>> <> do_float_encode(<<0::1, 0xFF::8, 0::1, 0::22>>), state}
+  end
+
+  defp encode({:float, :neg_infinity}, state, _) do
+    {<<@float_typecode>> <> do_float_encode(<<1::1, 0xFF::8, 0::1, 0::22>>), state}
+  end
+
+  defp encode({:float, :nan}, state, _) do
+    {<<@float_typecode>> <> do_float_encode(<<0::1, 0xFF::8, 1::1, 0::22>>), state}
+  end
+
+  defp encode({:float, :neg_nan}, state, _) do
+    {<<@float_typecode>> <> do_float_encode(<<1::1, 0xFF::8, 1::1, 0::22>>), state}
+  end
+
   defp encode({:float, data}, state, _) when data >= @min_f32 and data <= @max_f32 do
     {<<@float_typecode>> <> do_float_encode(<<data::float-big-32>>), state}
+  end
+
+  defp encode({:double, :infinity}, state, _) do
+    {<<@double_typecode>> <> do_float_encode(<<0::1, 0x7FF::11, 0::1, 0::51>>), state}
+  end
+
+  defp encode({:double, :neg_infinity}, state, _) do
+    {<<@double_typecode>> <> do_float_encode(<<1::1, 0x7FF::11, 0::1, 0::51>>), state}
+  end
+
+  defp encode({:double, :nan}, state, _) do
+    {<<@double_typecode>> <> do_float_encode(<<0::1, 0x7FF::11, 1::1, 0::51>>), state}
+  end
+
+  defp encode({:double, :neg_nan}, state, _) do
+    {<<@double_typecode>> <> do_float_encode(<<1::1, 0x7FF::11, 1::1, 0::51>>), state}
   end
 
   defp encode({:double, data}, state, _) do

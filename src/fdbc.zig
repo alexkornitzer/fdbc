@@ -597,6 +597,25 @@ fn tenantCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const er
     return erl.enif_make_tuple2(env, Atoms.OK, term);
 }
 
+fn tenantGetId(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+    var tenant: **fdb.FDBTenant = undefined;
+    if (argc != 1) {
+        return erl.enif_make_badarg(env);
+    }
+    if (erl.enif_get_resource(env, argv[0], Resources.FDB_TENANT, @ptrCast(&tenant)) == 0) {
+        return erl.enif_make_badarg(env);
+    }
+    const future: ?*fdb.FDBFuture = fdb.fdb_tenant_get_id(tenant.*);
+    const ft: *Future = @ptrCast(@alignCast(erl.enif_alloc_resource(Resources.FUTURE, @sizeOf(Future))));
+    ft.handle = future.?;
+    ft.resource = @ptrCast(tenant);
+    ft.type = .int64;
+    erl.enif_keep_resource(ft.resource);
+    const term: erl.ERL_NIF_TERM = erl.enif_make_resource(env, @ptrCast(@alignCast(ft)));
+    erl.enif_release_resource(@ptrCast(@alignCast(ft)));
+    return term;
+}
+
 const Transaction = struct {
     handle: *fdb.FDBTransaction,
     resource: ?*anyopaque,
@@ -1418,6 +1437,12 @@ var funcs = [_]erl.ErlNifFunc{
         .name = "tenant_create_transaction",
         .arity = 1,
         .fptr = tenantCreateTransaction,
+        .flags = 0,
+    },
+    erl.ErlNifFunc{
+        .name = "tenant_get_id",
+        .arity = 1,
+        .fptr = tenantGetId,
         .flags = 0,
     },
     erl.ErlNifFunc{

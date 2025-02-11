@@ -455,6 +455,7 @@ defmodule FDBC.Transaction do
   @spec add_conflict_key(t, binary, :read | :write) :: :ok
   def add_conflict_key(transaction, key, op) do
     :ok = add_conflict_range(transaction, key, key <> <<0x00>>, op)
+    :ok
   end
 
   @doc """
@@ -479,7 +480,11 @@ defmodule FDBC.Transaction do
         :write -> 1
       end
 
-    :ok = NIF.transaction_add_conflict_range(resource, start, stop, op)
+    case NIF.transaction_add_conflict_range(resource, start, stop, op) do
+      :ok -> :ok
+      {:error, code, reason} -> raise FDBC.Error, message: reason, code: code
+    end
+
     :ok
   end
 
@@ -1280,7 +1285,11 @@ defmodule FDBC.Transaction do
   """
   @spec set_read_version(t, integer) :: :ok
   def set_read_version(%__MODULE__{resource: resource}, version) do
-    :ok = NIF.transaction_set_read_version(resource, version)
+    case NIF.transaction_set_read_version(resource, version) do
+      :ok -> :ok
+      {:error, code, reason} -> raise FDBC.Error, message: reason, code: code
+    end
+
     :ok
   end
 

@@ -56,6 +56,7 @@ defmodule FDBC do
   alias FDBC.Database
   alias FDBC.Future
   alias FDBC.NIF
+  alias FDBC.Tenant
   alias FDBC.Transaction
 
   @doc """
@@ -102,6 +103,10 @@ defmodule FDBC do
 
   def transact(%Database{} = database, fun, opts) do
     Transaction.create(database, opts) |> do_transact(fun)
+  end
+
+  def transact(%Tenant{} = tenant, fun, opts) do
+    Transaction.create(tenant, opts) |> do_transact(fun)
   end
 
   def transact(%Transaction{} = tr, fun, _opts), do: fun.(tr)
