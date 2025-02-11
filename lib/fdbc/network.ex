@@ -414,6 +414,6 @@ defmodule FDBC.Network do
   end
 
   defp set_option(k, _) do
-    raise ArgumentError, message: "Invalid network option '#{k}' provided!"
+    raise ArgumentError, message: "invalid network option '#{k}' provided!"
   end
 end

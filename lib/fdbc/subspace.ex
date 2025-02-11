@@ -90,11 +90,25 @@ defmodule FDBC.Subspace do
 
     * `:keyed` - if present, then the tuple is returned as a keyword list, such
       as `[{string: "flip"}, {string: "flop"}]`.
+
+    * `:versionstamp` - if present, then the tuple must contain one incomplete
+      versionstamp whose postition will be encoded on the end of the key to
+      enable compatability with versionstamp operations; An `ArgumentError`
+      will be raised if no incomplete versionstamp is found or if more than one
+      is found. By default packing a tuple with an incomplete versionstamp will
+      raise an `ArgumentError`.
   """
   @spec pack(t, [any], keyword) :: binary
-  def pack(%__MODULE__{key: prefix}, data, opts \\ []) do
-    key = Tuple.pack(data, opts)
-    prefix <> key
+  def pack(%__MODULE__{key: prefix}, tuple, opts \\ []) do
+    key = Tuple.pack(tuple, opts)
+
+    if Keyword.get(opts, :versionstamp) do
+      size = byte_size(key) - 4
+      <<key::binary-size(size), offset::integer-little-32>> = key
+      prefix <> key <> <<offset + byte_size(prefix)::integer-little-32>>
+    else
+      prefix <> key
+    end
   end
 
   @doc """

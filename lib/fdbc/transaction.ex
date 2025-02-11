@@ -1067,25 +1067,31 @@ defmodule FDBC.Transaction do
             0 -> {KeySelector.greater_than(key), stop}
           end
 
-        limit =
-          case limit do
-            0 -> 0
-            _ -> limit - length(results)
-          end
+        left = limit - length(results)
 
-        [
-          do_range(
-            transaction,
-            start,
-            stop,
-            iteration + 1,
-            limit,
-            mode,
-            reverse,
-            snapshot
-          )
-          | results
-        ]
+        if limit == 0 || left > 0 do
+          limit =
+            case limit do
+              0 -> 0
+              _ -> left
+            end
+
+          [
+            do_range(
+              transaction,
+              start,
+              stop,
+              iteration + 1,
+              limit,
+              mode,
+              reverse,
+              snapshot
+            )
+            | results
+          ]
+        else
+          results
+        end
     end
   end
 
@@ -1446,7 +1452,9 @@ defmodule FDBC.Transaction do
 
   ## Helpers
 
-  defp increment_key(key) when is_binary(key) do
+  # Not private as its needed for testing.
+  @doc false
+  def increment_key(key) when is_binary(key) do
     size = byte_size(key)
 
     {key, size} =

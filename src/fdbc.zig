@@ -630,14 +630,14 @@ fn transactionSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.E
 
 fn transactionSetReadVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
-    var version: c_int = undefined;
+    var version: i64 = undefined;
     if (argc != 2) {
         return erl.enif_make_badarg(env);
     }
     if (erl.enif_get_resource(env, argv[0], Resources.TRANSACTION, @ptrCast(&transaction)) == 0) {
         return erl.enif_make_badarg(env);
     }
-    if (erl.enif_get_int(env, argv[1], &version) == 0) {
+    if (erl.enif_get_int64(env, argv[1], &version) == 0) {
         return erl.enif_make_badarg(env);
     }
     fdb.fdb_transaction_set_read_version(transaction.handle, version);
@@ -735,7 +735,7 @@ fn transactionGetRangeSplitPoints(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]c
     var begin_key_name_length: c_int = 0;
     var end_key_name: ?*u8 = null;
     var end_key_name_length: c_int = 0;
-    var chunk_size: c_int = undefined;
+    var chunk_size: i64 = undefined;
     if (argc != 4) {
         return erl.enif_make_badarg(env);
     }
@@ -754,7 +754,7 @@ fn transactionGetRangeSplitPoints(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]c
     }
     end_key_name = end_key_binary.data;
     end_key_name_length = @intCast(end_key_binary.size);
-    if (erl.enif_get_int(env, argv[3], &chunk_size) == 0) {
+    if (erl.enif_get_int64(env, argv[3], &chunk_size) == 0) {
         return erl.enif_make_badarg(env);
     }
     const future: ?*fdb.FDBFuture = fdb.fdb_transaction_get_range_split_points(transaction.handle, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length, chunk_size);

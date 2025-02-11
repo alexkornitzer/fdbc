@@ -121,21 +121,38 @@ defmodule FDBC.Tuple do
 
     * `:keyed` - if present, then the tuple is returned as a keyword list, such
       as `[{string: "flip"}, {string: "flop"}]`.
+
+    * `:versionstamp` - if present, then the tuple must contain one incomplete
+      versionstamp whose postition will be encoded on the end of the key to
+      enable compatability with versionstamp operations; An `ArgumentError`
+      will be raised if no incomplete versionstamp is found or if more than one
+      is found. By default packing a tuple with an incomplete versionstamp will
+      raise an `ArgumentError`.
   """
   @spec pack([any], keyword) :: binary
   def pack(tuple, opts \\ []) do
     if Keyword.get(opts, :keyed, false) do
       unless Keyword.keyword?(tuple) do
-        raise ArgumentError, "`tuple` must be a keyword list as `:keyed` mode is enabled"
+        raise ArgumentError, "tuple must be a keyword list as `:keyed` mode is enabled"
       end
     end
 
     extension = Keyword.get(opts, :extension)
     {key, state} = do_pack(extension, tuple, <<>>, [])
 
-    case Keyword.get(state, :versionstamp) do
-      nil -> key
-      offset -> key <> offset
+    if Keyword.get(opts, :versionstamp) do
+      case Keyword.get_values(state, :versionstamp) do
+        [] -> raise ArgumentError, "tuple is missing an incomplete versionstamp"
+        [offset] -> key <> offset
+        _ -> raise ArgumentError, "tuple contains more than one incomplete versionstamp"
+      end
+    else
+      if Keyword.get(state, :versionstamp) do
+        raise ArgumentError,
+              "tuple cannot contain an incomplete versionstamp unless `:versionstamp` is enabled"
+      end
+
+      key
     end
   end
 
@@ -399,7 +416,7 @@ defmodule FDBC.Tuple do
 
   defp encode({:binary, data}, state, _) do
     {<<@bytes_typecode>> <>
-       :binary.replace(data, <<@null_typecode>>, <<@null_typecode, @escape_typecode>>) <>
+       :binary.replace(data, <<@null_typecode>>, <<@null_typecode, @escape_typecode>>, [:global]) <>
        <<@null_typecode>>, state}
   end
 
@@ -408,7 +425,8 @@ defmodule FDBC.Tuple do
        :binary.replace(
          to_string(data),
          <<@null_typecode>>,
-         <<@null_typecode, @escape_typecode>>
+         <<@null_typecode, @escape_typecode>>,
+         [:global]
        ) <> <<@null_typecode>>, state}
   end
 
@@ -547,10 +565,6 @@ defmodule FDBC.Tuple do
   end
 
   defp encode({:versionstamp, data}, state, opts) do
-    if Keyword.get(state, :versionstamp) do
-      raise ArgumentError, "key is only allowed one incomplete versionstamp"
-    end
-
     state =
       if Versionstamp.incomplete?(data) do
         key = Keyword.fetch!(opts, :prefix)

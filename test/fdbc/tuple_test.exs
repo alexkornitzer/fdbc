@@ -55,7 +55,11 @@ defmodule FDBC.TupleTest do
 
     test "pack versionstamp" do
       assert "\x33\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00\x00\x01\x00\x00\x00" ==
-               Tuple.pack([Versionstamp.new()])
+               Tuple.pack([Versionstamp.new()], versionstamp: true)
+
+      assert_raise ArgumentError, fn ->
+        Tuple.pack([Versionstamp.new()])
+      end
     end
   end
 

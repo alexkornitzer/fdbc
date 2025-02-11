@@ -2,6 +2,7 @@ defmodule FDBC.SubspaceTest do
   use ExUnit.Case, async: true
 
   alias FDBC.Subspace
+  alias FDBC.Tuple.Versionstamp
 
   describe "new/1" do
     test "creates binary prefix correctly" do
@@ -40,6 +41,14 @@ defmodule FDBC.SubspaceTest do
     test "subspace packs correctly" do
       subspace = Subspace.new(["a", "b", "c"])
       assert "\x01a\0\x01b\0\x01c\0\x01foobar\0" == Subspace.pack(subspace, ["foobar"])
+    end
+
+    test "subspace packs versionstamp correctly" do
+      subspace = Subspace.new(["a", "b", "c"])
+      key = Subspace.pack(subspace, [Versionstamp.new()], versionstamp: true)
+
+      assert "\x01a\0\x01b\0\x01c\0\x33\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x0a\x00\x00\x00" ==
+               key
     end
   end
 
