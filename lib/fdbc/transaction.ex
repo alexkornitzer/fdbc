@@ -158,7 +158,7 @@ defmodule FDBC.Transaction do
   alias FDBC.NIF
   alias FDBC.Tenant
 
-  defstruct [:resource]
+  defstruct [:resource, :snapshot]
 
   @type t :: %__MODULE__{}
 
@@ -400,7 +400,7 @@ defmodule FDBC.Transaction do
     case NIF.database_create_transaction(database.resource) do
       {:ok, resource} ->
         Enum.each(opts, fn {k, v} -> set_option(resource, k, v) end)
-        %__MODULE__{resource: resource}
+        %__MODULE__{resource: resource, snapshot: false}
 
       {:error, code, reason} ->
         raise FDBC.Error, message: reason, code: code
@@ -411,7 +411,7 @@ defmodule FDBC.Transaction do
     case NIF.tenant_create_transaction(tenant.resource) do
       {:ok, resource} ->
         Enum.each(opts, fn {k, v} -> set_option(resource, k, v) end)
-        %__MODULE__{resource: resource}
+        %__MODULE__{resource: resource, snapshot: false}
 
       {:error, code, reason} ->
         raise FDBC.Error, message: reason, code: code
@@ -749,9 +749,9 @@ defmodule FDBC.Transaction do
   The same as `get/3` except it returns the unresolved future.
   """
   @spec async_get(t, binary, keyword) :: Future.t(binary | nil)
-  def async_get(%__MODULE__{resource: resource}, key, opts \\ []) do
+  def async_get(%__MODULE__{resource: resource, snapshot: snapshot}, key, opts \\ []) do
     snapshot =
-      case Keyword.get(opts, :snapshot, false) do
+      case Keyword.get(opts, :snapshot, snapshot) do
         false -> 0
         true -> 1
       end
@@ -870,12 +870,12 @@ defmodule FDBC.Transaction do
   """
   @spec async_get_key(t, KeySelector.t(), keyword) :: Future.t(binary)
   def async_get_key(
-        %__MODULE__{resource: resource},
+        %__MODULE__{resource: resource, snapshot: snapshot},
         %KeySelector{key: key, or_equal: or_equal, offset: offset},
         opts \\ []
       ) do
     snapshot =
-      case Keyword.get(opts, :snapshot, false) do
+      case Keyword.get(opts, :snapshot, snapshot) do
         false -> 0
         true -> 1
       end
@@ -982,7 +982,7 @@ defmodule FDBC.Transaction do
       end
 
     snapshot =
-      case Keyword.get(opts, :snapshot, false) do
+      case Keyword.get(opts, :snapshot, transaction.snapshot) do
         true -> 1
         false -> 0
       end
@@ -1294,6 +1294,42 @@ defmodule FDBC.Transaction do
   end
 
   @doc """
+  Returns the transaction where `:snapshot` is `true` by default.
+
+  When used any `get_*` function that supports snapshot reads will do so by
+  default, thus inverting the default of the optional.
+
+  Snapshot reads selectively relax FoundationDB’s isolation property, reducing
+  [conflicts](https://apple.github.io/foundationdb/developer-guide.html#developer-guide-transaction-conflicts)
+  but making it harder to reason about concurrency.
+
+  By default, FoundationDB transactions
+  [guarantee](https://apple.github.io/foundationdb/developer-guide.html#acid)
+  strictly serializable isolation, resulting in a state that is as if
+  transactions were executed one at a time, even if they were executed
+  concurrently. Serializability has little performance cost when there are few
+  conflicts but can be expensive when there are many. FoundationDB therefore
+  also permits individual reads within a transaction to be done as snapshot
+  reads.
+
+  Snapshot reads differ from ordinary (strictly serializable) reads by
+  permitting the values they read to be modified by concurrent transactions,
+  whereas strictly serializable reads cause conflicts in that case. Like
+  strictly serializable reads, snapshot reads see the effects of prior writes
+  in the same transaction. For more information on the use of snapshot reads,
+  see [Snapshot reads](https://apple.github.io/foundationdb/developer-guide.html#snapshot-isolation).
+
+  Snapshot reads also interact with transaction commit a little differently
+  than normal reads. If a snapshot read is outstanding when transaction commit
+  is called that read will immediately return an error. (Normally, transaction
+  commit will wait until outstanding reads return before committing.)
+  """
+  @spec snapshot(t) :: t
+  def snapshot(%__MODULE__{resource: resource}) do
+    %__MODULE__{resource: resource, snapshot: true}
+  end
+
+  @doc """
   Streams all the key-value pairs for the given range.
 
   This function supports the same options as `get_range/4`.
@@ -1303,7 +1339,7 @@ defmodule FDBC.Transaction do
   def stream(transaction, start, stop, opts \\ [])
 
   def stream(
-        %__MODULE__{resource: resource},
+        %__MODULE__{resource: resource, snapshot: snapshot},
         %KeySelector{} = start,
         %KeySelector{} = stop,
         opts
@@ -1328,7 +1364,7 @@ defmodule FDBC.Transaction do
       end
 
     snapshot =
-      case Keyword.get(opts, :snapshot, false) do
+      case Keyword.get(opts, :snapshot, snapshot) do
         true -> 1
         false -> 0
       end

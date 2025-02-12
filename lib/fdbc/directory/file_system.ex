@@ -29,7 +29,7 @@ defmodule FDBC.Directory.FileSystem do
       partition: partition,
       node: node,
       path: [],
-      root: node
+      root: nil
     }
   end
 
@@ -50,8 +50,11 @@ defmodule FDBC.Directory.FileSystem do
                   "partition" ->
                     raise ArgumentError, "the partition label is reserved"
 
-                  label ->
+                  label when is_binary(label) ->
                     label
+
+                  _ ->
+                    raise ArgumentError, "the label must be a string"
                 end
               end
 
@@ -70,7 +73,7 @@ defmodule FDBC.Directory.FileSystem do
               {:ok, select(parent, label, subdir, List.last(path))}
             end
           else
-            {:error, "the directory doesn't exist"}
+            {:error, "the directory does not exist"}
           end
 
         fs ->
@@ -123,6 +126,10 @@ defmodule FDBC.Directory.FileSystem do
       ) do
     parents = Keyword.get(opts, :parents, false)
 
+    if fs.root == nil && source == [] do
+      raise ArgumentError, "cannot move the root directory"
+    end
+
     with :ok <- check_version(fs, tr, read_only: false) do
       case find(fs, tr, source) do
         nil ->
@@ -140,26 +147,33 @@ defmodule FDBC.Directory.FileSystem do
                     parents: true
                   )
                 else
-                  find(fs, tr, parent_dest_path)
+                  {:ok, find(fs, tr, parent_dest_path)}
                 end
 
-              if source_node.partition.metadata != dest_parent.partition.metadata do
-                {:error, "cannot move between layers"}
-              else
-                [prefix] = Subspace.unpack(source_node.partition.metadata, source_node.node.key)
+              with {:ok, dest_parent} <- dest_parent do
+                if dest_parent do
+                  if source_node.partition.metadata != dest_parent.partition.metadata do
+                    {:error, "cannot move between layers"}
+                  else
+                    [prefix] =
+                      Subspace.unpack(source_node.partition.metadata, source_node.node.key)
 
-                Transaction.set(
-                  tr,
-                  Subspace.pack(dest_parent.node, [@subdirs, List.last(destination)]),
-                  prefix
-                )
+                    Transaction.set(
+                      tr,
+                      Subspace.pack(dest_parent.node, [@subdirs, List.last(destination)]),
+                      prefix
+                    )
 
-                source_parent = find(fs, tr, Enum.drop(source, -1))
+                    source_parent = find(fs, tr, Enum.drop(source, -1))
 
-                Transaction.clear(
-                  tr,
-                  Subspace.pack(source_parent.node, [@subdirs, List.last(source)])
-                )
+                    Transaction.clear(
+                      tr,
+                      Subspace.pack(source_parent.node, [@subdirs, List.last(source)])
+                    )
+                  end
+                else
+                  {:error, "the parent directory does not exist"}
+                end
               end
 
             _ ->
@@ -205,11 +219,13 @@ defmodule FDBC.Directory.FileSystem do
     remove_subdirs(fs, tr, subdirs)
   end
 
+  def root(%__MODULE__{} = fs), do: fs.root || fs.partition |> new()
+
   ## Helpers
 
   defp allocate_prefix(%__MODULE__{} = fs, %Transaction{} = tr, prefix) do
     if prefix do
-      if fs.root.key != partition_node(fs.partition).key do
+      if root_node(fs).key != partition_node(fs.partition).key do
         raise ArgumentError, "cannot specify a prefix in a partition"
       end
 
@@ -340,6 +356,10 @@ defmodule FDBC.Directory.FileSystem do
     partition.metadata |> Subspace.concat([partition.metadata.key])
   end
 
+  defp root_node(%__MODULE__{} = fs) do
+    partition_node(fs.root || fs.partition)
+  end
+
   defp select(%__MODULE__{} = fs, "partition", subdir, name) do
     [prefix] = Subspace.unpack(fs.partition.metadata, subdir.key)
 
@@ -353,7 +373,7 @@ defmodule FDBC.Directory.FileSystem do
       partition: partition,
       node: partition_node(partition),
       path: fs.path ++ [name],
-      root: fs.root
+      root: fs.root || fs.partition
     }
   end
 

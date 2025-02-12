@@ -200,20 +200,18 @@ defmodule FDBC.Directory do
       the prefix is allocated automatically.
   """
   @spec create(t, Database.t() | Transaction.t(), [String.t()], keyword) :: :ok | {:error, term}
-  def create(dir, db_or_tr, path, opts \\ [])
-
-  def create(%__MODULE__{} = _dir, _db_or_tr, [], _opts) do
-    :ok
-  end
-
-  def create(%__MODULE__{} = dir, db_or_tr, path, opts) do
+  def create(%__MODULE__{} = dir, db_or_tr, path, opts \\ []) do
     opts = Keyword.put(opts, :create, true)
 
-    FDBC.transact(db_or_tr, fn tr ->
-      with {:ok, _} <- open(dir, tr, path, opts) do
-        :ok
-      end
-    end)
+    if exists?(dir, db_or_tr, path) do
+      {:error, "the directory already exists"}
+    else
+      FDBC.transact(db_or_tr, fn tr ->
+        with {:ok, _} <- open(dir, tr, path, opts) do
+          :ok
+        end
+      end)
+    end
   end
 
   @doc """
@@ -238,7 +236,8 @@ defmodule FDBC.Directory do
 
   def exists?(%__MODULE__{} = dir, db_or_tr, []) do
     FDBC.transact(db_or_tr, fn tr ->
-      case FileSystem.find_directory(dir.file_system, tr, []) do
+      case FileSystem.root(dir.file_system)
+           |> FileSystem.find_directory(tr, dir.file_system.path) do
         {:ok, nil} -> false
         {:ok, _} -> true
         {:error, error} -> raise error
@@ -250,7 +249,8 @@ defmodule FDBC.Directory do
     path = path_to_tuple(path)
 
     FDBC.transact(db_or_tr, fn tr ->
-      case FileSystem.find_directory(dir.file_system, tr, path) do
+      case FileSystem.root(dir.file_system)
+           |> FileSystem.find_directory(tr, dir.file_system.path ++ path) do
         {:ok, nil} -> false
         {:ok, _} -> true
         {:error, error} -> raise error
@@ -279,7 +279,8 @@ defmodule FDBC.Directory do
     path = path_to_tuple(path)
 
     FDBC.transact(db_or_tr, fn tr ->
-      FileSystem.list_directory(dir.file_system, tr, path)
+      FileSystem.root(dir.file_system)
+      |> FileSystem.list_directory(tr, dir.file_system.path ++ path)
     end)
   end
 
@@ -301,7 +302,7 @@ defmodule FDBC.Directory do
   ## Options
 
     * `:parents` - allows the creation of parent directories if not present,
-      otherwise an exception will be raised.
+      otherwise an error will occur.
   """
   @spec move(t, Database.t() | Transaction.t(), [String.t()], [String.t()], keyword) ::
           :ok | {:error, term}
@@ -338,8 +339,18 @@ defmodule FDBC.Directory do
           {:ok, t} | {:error, term}
   def open(dir, db_or_tr, path, opts \\ [])
 
-  def open(%__MODULE__{} = dir, _db_or_tr, [], _opts) do
-    dir
+  def open(%__MODULE__{} = dir, _db_or_tr, [], opts) do
+    if dir.file_system.path == [] do
+      if dir.file_system.root == nil do
+        raise ArgumentError, "cannot open the root directory"
+      end
+
+      if Keyword.get(opts, :create) do
+        raise ArgumentError, "cannot create directory as no path was provided"
+      end
+    end
+
+    {:ok, dir}
   end
 
   def open(%__MODULE__{} = dir, db_or_tr, path, opts) do
@@ -352,7 +363,10 @@ defmodule FDBC.Directory do
     path = path_to_tuple(path)
 
     FDBC.transact(db_or_tr, fn tr ->
-      with {:ok, file_system} <- FileSystem.change_directory(dir.file_system, tr, path, opts) do
+      path = dir.file_system.path ++ path
+
+      with {:ok, file_system} <-
+             FileSystem.root(dir.file_system) |> FileSystem.change_directory(tr, path, opts) do
         {:ok, %__MODULE__{dir | file_system: file_system}}
       end
     end)
@@ -382,6 +396,12 @@ defmodule FDBC.Directory do
   directory.
   """
   @spec remove(t, Database.t() | Transaction.t(), [String.t()]) :: :ok | {:error, term}
+  def remove(directory, db_or_tr, path)
+
+  def remove(%__MODULE__{}, _, []) do
+    raise ArgumentError, "cannot remove current working directory"
+  end
+
   def remove(%__MODULE__{} = dir, db_or_tr, path) do
     path = path_to_tuple(path)
 

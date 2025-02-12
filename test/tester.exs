@@ -75,6 +75,8 @@ defmodule Stack do
     end
   end
 
+  def pop_many(stack, 0), do: {[], stack}
+
   def pop_many(stack, count) do
     {pairs, stack} =
       Enum.reduce(1..count, {[], stack}, fn _, {pairs, stack} ->
@@ -115,6 +117,7 @@ end
 
 defmodule Machine do
   alias FDBC.Database
+  alias FDBC.Directory
   alias FDBC.Error
   alias FDBC.Future
   alias FDBC.KeySelector
@@ -126,6 +129,11 @@ defmodule Machine do
   def start(db, prefix) do
     state = %{
       db: db,
+      directories: [
+        Directory.new()
+      ],
+      directories_act_idx: 0,
+      directories_err_idx: 0,
       name: prefix,
       read_version: 0,
       processes: [],
@@ -698,6 +706,300 @@ defmodule Machine do
     end)
   end
 
+  ## Directory Operations
+
+  def execute(machine, _id, [{_, "DIRECTORY_CREATE_SUBSPACE"}]) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {path, stack} = Stack.pop_many(stack, count)
+    {{_, raw_prefix}, stack} = Stack.pop(stack)
+
+    path =
+      case path do
+        path when is_list(path) -> path
+        _ -> [path]
+      end
+
+    subspace = Subspace.new(raw_prefix) |> Subspace.concat(path)
+    %{machine | directories: machine.directories ++ [subspace], stack: stack}
+  end
+
+  def execute(machine, _id, [{_, "DIRECTORY_CREATE_LAYER"}]) do
+    {pairs, stack} = Stack.pop_many(machine.stack, 3)
+    [index1, index2, allow_manual_prefixes] = Keyword.values(pairs)
+    content = Enum.at(machine.directories, index2)
+    metadata = Enum.at(machine.directories, index1)
+
+    if content == nil || metadata == nil do
+      %{machine | directories: machine.directories ++ [nil]}
+    else
+      directory =
+        Directory.new(
+          allow_manual_prefixes: allow_manual_prefixes == 1,
+          partition: %{
+            content: content,
+            metadata: metadata
+          }
+        )
+
+      %{machine | directories: machine.directories ++ [directory], stack: stack}
+    end
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_CREATE_OR_OPEN"}]),
+    do: do_directory_open(machine, id, nil, true)
+
+  def execute(machine, id, [{_, "DIRECTORY_CREATE_OR_OPEN_DATABASE"}]),
+    do: do_directory_open(machine, id, :database, true)
+
+  def execute(machine, id, [{_, "DIRECTORY_CREATE"}]), do: do_directory_create(machine, id)
+
+  def execute(machine, id, [{_, "DIRECTORY_CREATE_DATABASE"}]),
+    do: do_directory_create(machine, id, :database)
+
+  def execute(machine, id, [{_, "DIRECTORY_OPEN"}]), do: do_directory_open(machine, id)
+
+  def execute(machine, id, [{_, "DIRECTORY_OPEN_DATABASE"}]),
+    do: do_directory_open(machine, id, :database)
+
+  def execute(machine, id, [{_, "DIRECTORY_OPEN_SNAPSHOT"}]),
+    do: do_directory_open(machine, id, :snapshot)
+
+  def execute(machine, _id, [{_, "DIRECTORY_CHANGE"}]) do
+    {{_, index}, stack} = Stack.pop(machine.stack)
+
+    if Enum.at(machine.directories, index) do
+      %{machine | directories_act_idx: index, stack: stack}
+    else
+      %{machine | directories_act_idx: machine.directories_err_idx, stack: stack}
+    end
+  end
+
+  def execute(machine, _id, [{_, "DIRECTORY_SET_ERROR_INDEX"}]) do
+    {{_, index}, stack} = Stack.pop(machine.stack)
+    %{machine | directories_err_idx: index, stack: stack}
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_MOVE"}]), do: do_directory_move(machine, id)
+
+  def execute(machine, id, [{_, "DIRECTORY_MOVE_DATABASE"}]),
+    do: do_directory_move(machine, id, :database)
+
+  def execute(machine, id, [{_, "DIRECTORY_MOVE_TO"}]), do: do_directory_move_to(machine, id)
+
+  def execute(machine, id, [{_, "DIRECTORY_MOVE_TO_DATABASE"}]),
+    do: do_directory_move_to(machine, id, :database)
+
+  def execute(machine, id, [{_, "DIRECTORY_REMOVE"}]), do: do_directory_remove(machine, id)
+
+  def execute(machine, id, [{_, "DIRECTORY_REMOVE_DATABASE"}]),
+    do: do_directory_remove(machine, id, :database)
+
+  def execute(machine, id, [{_, "DIRECTORY_REMOVE_IF_EXISTS"}]),
+    do: do_directory_remove(machine, id, nil, true)
+
+  def execute(machine, id, [{_, "DIRECTORY_REMOVE_IF_EXISTS_DATABASE"}]),
+    do: do_directory_remove(machine, id, :database, true)
+
+  def execute(machine, id, [{_, "DIRECTORY_LIST"}]), do: do_directory_list(machine, id)
+
+  def execute(machine, id, [{_, "DIRECTORY_LIST_DATABASE"}]),
+    do: do_directory_list(machine, id, :database)
+
+  def execute(machine, id, [{_, "DIRECTORY_LIST_SNAPSHOT"}]),
+    do: do_directory_list(machine, id, :snapshot)
+
+  def execute(machine, id, [{_, "DIRECTORY_EXISTS"}]), do: do_directory_exists(machine, id)
+
+  def execute(machine, id, [{_, "DIRECTORY_EXISTS_DATABASE"}]),
+    do: do_directory_exists(machine, id, :database)
+
+  def execute(machine, id, [{_, "DIRECTORY_EXISTS_SNAPSHOT"}]),
+    do: do_directory_exists(machine, id, :snapshot)
+
+  def execute(machine, id, [{_, "DIRECTORY_PACK_KEY"}]) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {tuple, stack} = Stack.pop_many(stack, count)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    tuple =
+      case tuple do
+        tuple when is_list(tuple) -> tuple
+        _ -> [tuple]
+      end
+
+    catch_directory_error(machine, id, stack, fn ->
+      key =
+        case directory do
+          %Directory{} -> Directory.subspace!(directory)
+          %Subspace{} -> directory
+        end
+        |> Subspace.pack(tuple)
+
+      %{machine | stack: Stack.push(stack, id, {:binary, key})}
+    end)
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_UNPACK_KEY"}]) do
+    {{_, key}, stack} = Stack.pop(machine.stack)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    catch_directory_error(machine, id, stack, fn ->
+      subspace =
+        case directory do
+          %Directory{} -> Directory.subspace!(directory)
+          %Subspace{} -> directory
+        end
+
+      stack =
+        subspace
+        |> Subspace.unpack(key, keyed: true)
+        |> Enum.reduce(stack, fn pair, stack ->
+          Stack.push(stack, id, pair)
+        end)
+
+      %{machine | stack: stack}
+    end)
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_RANGE"}]) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {tuple, stack} = Stack.pop_many(stack, count)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    catch_directory_error(machine, id, stack, fn ->
+      subspace =
+        case directory do
+          %Directory{} -> Directory.subspace!(directory)
+          %Subspace{} -> directory
+        end
+
+      {start, stop} = Subspace.range(subspace, tuple)
+
+      %{
+        machine
+        | stack: Stack.push(stack, id, {:binary, start}) |> Stack.push(id, {:binary, stop})
+      }
+    end)
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_CONTAINS"}]) do
+    {{_, key}, stack} = Stack.pop(machine.stack)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    catch_directory_error(machine, id, stack, fn ->
+      subspace =
+        case directory do
+          %Directory{} -> Directory.subspace!(directory)
+          %Subspace{} -> directory
+        end
+
+      result =
+        case Subspace.contains?(subspace, key) do
+          true -> 1
+          false -> 0
+        end
+
+      %{machine | stack: Stack.push(stack, id, {:integer, result})}
+    end)
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_OPEN_SUBSPACE"}]) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {tuple, stack} = Stack.pop_many(stack, count)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    catch_directory_error(
+      machine,
+      id,
+      stack,
+      fn ->
+        subspace =
+          case directory do
+            %Directory{} -> Directory.subspace!(directory)
+            %Subspace{} -> directory
+          end
+
+        subspace = Subspace.concat(subspace, tuple)
+        %{machine | directories: machine.directories ++ [subspace], stack: stack}
+      end,
+      true
+    )
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_LOG_SUBSPACE"}]) do
+    {{_, prefix}, stack} = Stack.pop(machine.stack)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+    key = prefix <> Tuple.pack([machine.directories_act_idx])
+
+    catch_directory_error(machine, id, stack, fn ->
+      value =
+        case directory do
+          %Directory{} -> Directory.subspace!(directory).key
+          %Subspace{} -> directory.key
+        end
+
+      tr = Transactions.get(machine.name)
+      :ok = Transaction.set(tr, key, value)
+      %{machine | stack: stack}
+    end)
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_LOG_DIRECTORY"}]) do
+    {{_, prefix}, stack} = Stack.pop(machine.stack)
+    log_subspace = Subspace.new(prefix) |> Subspace.concat([machine.directories_act_idx])
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    catch_directory_error(machine, id, stack, fn ->
+      tr = Transactions.get(machine.name)
+      key = Subspace.pack(log_subspace, [{:string, "path"}])
+      value = Directory.path(directory) |> Enum.map(fn x -> {:string, x} end) |> Tuple.pack()
+      :ok = Transaction.set(tr, key, value)
+      key = Subspace.pack(log_subspace, [{:string, "layer"}])
+      value = Tuple.pack([{:binary, directory.file_system.label}])
+      :ok = Transaction.set(tr, key, value)
+      key = Subspace.pack(log_subspace, [{:string, "exists"}])
+
+      value =
+        case Directory.exists?(directory, tr) do
+          true -> 1
+          false -> 0
+        end
+
+      :ok = Transaction.set(tr, key, Tuple.pack([value]))
+      key = Subspace.pack(log_subspace, [{:string, "children"}])
+
+      value =
+        case value do
+          1 -> Directory.list!(directory, tr) |> Enum.map(fn x -> {:string, x} end)
+          0 -> []
+        end
+
+      :ok = Transaction.set(tr, key, Tuple.pack(value))
+      %{machine | stack: stack}
+    end)
+  end
+
+  def execute(machine, id, [{_, "DIRECTORY_STRIP_PREFIX"}]) do
+    {{_, binary}, stack} = Stack.pop(machine.stack)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    catch_directory_error(machine, id, stack, fn ->
+      key =
+        case directory do
+          %Directory{} -> Directory.subspace!(directory).key
+          %Subspace{} -> directory.key
+        end
+
+      value =
+        case binary do
+          <<^key::binary, rest::binary>> -> rest
+          _ -> raise ArgumentError, "binary does not start with directory key as prefix"
+        end
+
+      %{machine | stack: Stack.push(stack, id, {:binary, value})}
+    end)
+  end
+
   ## Helpers
 
   def do_atomic_op(machine, id, kind \\ nil) do
@@ -761,6 +1063,289 @@ defmodule Machine do
         %{machine | stack: stack}
       end
     end)
+  end
+
+  def do_directory_create(machine, id, kind \\ nil) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {path, stack} = Stack.pop_many(stack, count)
+    {pairs, stack} = Stack.pop_many(stack, 2)
+    [layer, prefix] = Keyword.values(pairs)
+
+    {label, partition} =
+      case layer do
+        "partition" -> {nil, true}
+        x -> {x, false}
+      end
+
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    db_or_tr =
+      case kind do
+        nil ->
+          Transactions.get(machine.name)
+
+        :database ->
+          machine.db
+      end
+
+    catch_directory_error(
+      machine,
+      id,
+      stack,
+      fn ->
+        :ok =
+          Directory.create!(directory, db_or_tr, path,
+            label: label,
+            parents: true,
+            partition: partition,
+            prefix: prefix
+          )
+
+        dir = Directory.open!(directory, db_or_tr, path)
+
+        %{machine | directories: machine.directories ++ [dir], stack: stack}
+      end,
+      true
+    )
+  end
+
+  def do_directory_exists(machine, id, kind \\ nil) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+
+    db_or_tr =
+      case kind do
+        nil ->
+          Transactions.get(machine.name)
+
+        :database ->
+          machine.db
+
+        :snapshot ->
+          Transactions.get(machine.name) |> Transaction.snapshot()
+      end
+
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    case count do
+      0 ->
+        catch_directory_error(machine, id, stack, fn ->
+          item =
+            case Directory.exists?(directory, db_or_tr) do
+              false -> 0
+              true -> 1
+            end
+
+          %{machine | stack: Stack.push(stack, id, {:integer, item})}
+        end)
+
+      1 ->
+        {{_, count}, stack} = Stack.pop(stack)
+        {path, stack} = Stack.pop_many(stack, count)
+
+        catch_directory_error(machine, id, stack, fn ->
+          item =
+            case Directory.exists?(directory, db_or_tr, path) do
+              false -> 0
+              true -> 1
+            end
+
+          %{machine | stack: Stack.push(stack, id, {:integer, item})}
+        end)
+    end
+  end
+
+  def do_directory_list(machine, id, kind \\ nil) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+
+    db_or_tr =
+      case kind do
+        nil ->
+          Transactions.get(machine.name)
+
+        :database ->
+          machine.db
+
+        :snapshot ->
+          Transactions.get(machine.name) |> Transaction.snapshot()
+      end
+
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    case count do
+      0 ->
+        catch_directory_error(machine, id, stack, fn ->
+          item = Directory.list!(directory, db_or_tr) |> Enum.map(&{:string, &1}) |> Tuple.pack()
+          %{machine | stack: Stack.push(stack, id, {:binary, item})}
+        end)
+
+      1 ->
+        {{_, count}, stack} = Stack.pop(stack)
+        {path, stack} = Stack.pop_many(stack, count)
+
+        catch_directory_error(machine, id, stack, fn ->
+          item =
+            Directory.list!(directory, db_or_tr, path) |> Enum.map(&{:string, &1}) |> Tuple.pack()
+
+          %{machine | stack: Stack.push(stack, id, {:binary, item})}
+        end)
+    end
+  end
+
+  def do_directory_move(machine, id, kind \\ nil) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {old_path, stack} = Stack.pop_many(stack, count)
+    {{_, count}, stack} = Stack.pop(stack)
+    {new_path, stack} = Stack.pop_many(stack, count)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    db_or_tr =
+      case kind do
+        nil ->
+          Transactions.get(machine.name)
+
+        :database ->
+          machine.db
+      end
+
+    catch_directory_error(
+      machine,
+      id,
+      stack,
+      fn ->
+        :ok = Directory.move!(directory, db_or_tr, old_path, new_path)
+        {:ok, dir} = Directory.open(directory, db_or_tr, new_path)
+        %{machine | directories: machine.directories ++ [dir], stack: stack}
+      end,
+      true
+    )
+  end
+
+  def do_directory_move_to(machine, id, kind \\ nil) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {new_path, stack} = Stack.pop_many(stack, count)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    db_or_tr =
+      case kind do
+        nil ->
+          Transactions.get(machine.name)
+
+        :database ->
+          machine.db
+      end
+
+    catch_directory_error(
+      machine,
+      id,
+      stack,
+      fn ->
+        root = Directory.new(partition: directory.file_system.partition)
+        path = Directory.path(directory)
+        :ok = Directory.move!(root, db_or_tr, path, new_path)
+        {:ok, dir} = Directory.open(root, db_or_tr, new_path)
+        %{machine | directories: machine.directories ++ [dir], stack: stack}
+      end,
+      true
+    )
+  end
+
+  def do_directory_open(machine, id, kind \\ nil, create \\ false) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    {path, stack} = Stack.pop_many(stack, count)
+    {{_, layer}, stack} = Stack.pop(stack)
+
+    {label, partition} =
+      case layer do
+        "partition" -> {"partition", true}
+        x -> {x, false}
+      end
+
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    db_or_tr =
+      case kind do
+        nil ->
+          Transactions.get(machine.name)
+
+        :database ->
+          machine.db
+
+        :snapshot ->
+          Transactions.get(machine.name) |> Transaction.snapshot()
+      end
+
+    catch_directory_error(
+      machine,
+      id,
+      stack,
+      fn ->
+        dir =
+          Directory.open!(directory, db_or_tr, path,
+            create: create,
+            label: label,
+            parents: true,
+            partition: partition
+          )
+
+        if label != dir.file_system.label do
+          raise ArgumentError, "provided label does not match that of the directory"
+        end
+
+        %{machine | directories: machine.directories ++ [dir], stack: stack}
+      end,
+      true
+    )
+  end
+
+  def do_directory_remove(machine, id, kind \\ nil, exists \\ false) do
+    {{_, count}, stack} = Stack.pop(machine.stack)
+    directory = Enum.at(machine.directories, machine.directories_act_idx)
+
+    db_or_tr =
+      case kind do
+        nil ->
+          Transactions.get(machine.name)
+
+        :database ->
+          machine.db
+      end
+
+    case count do
+      0 ->
+        catch_directory_error(machine, id, stack, fn ->
+          root = Directory.new(partition: directory.file_system.partition)
+          path = Directory.path(directory)
+
+          if exists == false || Directory.exists?(root, db_or_tr, path) do
+            :ok = Directory.remove!(root, db_or_tr, path)
+          end
+
+          %{machine | stack: stack}
+        end)
+
+      1 ->
+        {{_, count}, stack} = Stack.pop(stack)
+        {path, stack} = Stack.pop_many(stack, count)
+
+        catch_directory_error(machine, id, stack, fn ->
+          case path do
+            [] ->
+              root = Directory.new(partition: directory.file_system.partition)
+              path = Directory.path(directory)
+
+              if exists == false || Directory.exists?(root, db_or_tr, path) do
+                :ok = Directory.remove!(root, db_or_tr, path)
+              end
+
+            path ->
+              if exists == false || Directory.exists?(directory, db_or_tr, path) do
+                :ok = Directory.remove!(directory, db_or_tr, path)
+              end
+          end
+
+          %{machine | stack: stack}
+        end)
+    end
   end
 
   defp do_get(machine, id, kind \\ nil) do
@@ -919,6 +1504,23 @@ defmodule Machine do
     end)
   end
 
+  defp catch_directory_error(machine, id, stack, fun, append \\ false) do
+    try do
+      fun.()
+    rescue
+      _ in [ArgumentError, FDBC.Error, RuntimeError] ->
+        if append do
+          %{
+            machine
+            | directories: machine.directories ++ [nil],
+              stack: Stack.push(stack, id, {:binary, "DIRECTORY_ERROR"})
+          }
+        else
+          %{machine | stack: Stack.push(stack, id, {:binary, "DIRECTORY_ERROR"})}
+        end
+    end
+  end
+
   defp catch_error(machine, id, stack, fun) do
     try do
       fun.()
@@ -931,8 +1533,8 @@ defmodule Machine do
 
   defp clamp_limit(limit) do
     # We don't clamp because the Python implementation relies on the overflow
-    # being treated as 0... and that is the gold standard that output is
-    # compared with... eurgh...
+    # being treated as a side effect... and that is the gold standard that
+    # output is compared with... eurgh...
     <<truncated::integer-32>> = <<limit::integer-32>>
 
     cond do
