@@ -4,6 +4,7 @@ defmodule FDBC.Directory.FileSystem do
   alias FDBC.Directory.HighContentionAllocator
   alias FDBC.Subspace
   alias FDBC.Transaction
+  alias FDBC.Tuple
 
   @subdirs 0
   @version {1, 0, 0}
@@ -127,58 +128,62 @@ defmodule FDBC.Directory.FileSystem do
     parents = Keyword.get(opts, :parents, false)
 
     if fs.root == nil && source == [] do
-      raise ArgumentError, "cannot move the root directory"
-    end
-
-    with :ok <- check_version(fs, tr, read_only: false) do
-      case find(fs, tr, source) do
-        nil ->
-          {:error, "the source directory does not exist"}
-
-        source_node ->
-          case find(fs, tr, destination) do
+      {:error, "cannot move the root directory"}
+    else
+      with :ok <- check_version(fs, tr, read_only: false) do
+        if subpath?(source, destination) do
+          {:error, "the destination cannot be a subdirectory of the source directory"}
+        else
+          case find(fs, tr, source) do
             nil ->
-              parent_dest_path = Enum.drop(destination, -1)
+              {:error, "the source directory does not exist"}
 
-              dest_parent =
-                if parents do
-                  change_directory(fs, tr, parent_dest_path,
-                    create: true,
-                    parents: true
-                  )
-                else
-                  {:ok, find(fs, tr, parent_dest_path)}
-                end
+            source_node ->
+              case find(fs, tr, destination) do
+                nil ->
+                  parent_dest_path = Enum.drop(destination, -1)
 
-              with {:ok, dest_parent} <- dest_parent do
-                if dest_parent do
-                  if source_node.partition.metadata != dest_parent.partition.metadata do
-                    {:error, "cannot move between layers"}
-                  else
-                    [prefix] =
-                      Subspace.unpack(source_node.partition.metadata, source_node.node.key)
+                  dest_parent =
+                    if parents do
+                      change_directory(fs, tr, parent_dest_path,
+                        create: true,
+                        parents: true
+                      )
+                    else
+                      {:ok, find(fs, tr, parent_dest_path)}
+                    end
 
-                    Transaction.set(
-                      tr,
-                      Subspace.pack(dest_parent.node, [@subdirs, List.last(destination)]),
-                      prefix
-                    )
+                  with {:ok, dest_parent} <- dest_parent do
+                    if dest_parent do
+                      if source_node.partition.metadata != dest_parent.partition.metadata do
+                        {:error, "cannot move between layers"}
+                      else
+                        [prefix] =
+                          Subspace.unpack(source_node.partition.metadata, source_node.node.key)
 
-                    source_parent = find(fs, tr, Enum.drop(source, -1))
+                        Transaction.set(
+                          tr,
+                          Subspace.pack(dest_parent.node, [@subdirs, List.last(destination)]),
+                          prefix
+                        )
 
-                    Transaction.clear(
-                      tr,
-                      Subspace.pack(source_parent.node, [@subdirs, List.last(source)])
-                    )
+                        source_parent = find(fs, tr, Enum.drop(source, -1))
+
+                        Transaction.clear(
+                          tr,
+                          Subspace.pack(source_parent.node, [@subdirs, List.last(source)])
+                        )
+                      end
+                    else
+                      {:error, "the parent directory does not exist"}
+                    end
                   end
-                else
-                  {:error, "the parent directory does not exist"}
-                end
-              end
 
-            _ ->
-              {:error, "the destination directory already exists"}
+                _ ->
+                  {:error, "the destination directory already exists"}
+              end
           end
+        end
       end
     end
   end
@@ -219,7 +224,7 @@ defmodule FDBC.Directory.FileSystem do
     remove_subdirs(fs, tr, subdirs)
   end
 
-  def root(%__MODULE__{} = fs), do: fs.root || fs.partition |> new()
+  def root(%__MODULE__{} = fs), do: (fs.root || fs.partition) |> new()
 
   ## Helpers
 
@@ -331,7 +336,7 @@ defmodule FDBC.Directory.FileSystem do
           [prefix | _] = Subspace.unpack(fs.partition.metadata, k)
 
           case key do
-            <<^prefix, _>> -> Subspace.concat(fs.partition.metadata, [prefix])
+            <<^prefix::binary, _::binary>> -> Subspace.concat(fs.partition.metadata, [prefix])
             _ -> nil
           end
         end)
@@ -385,5 +390,15 @@ defmodule FDBC.Directory.FileSystem do
       path: fs.path ++ [name],
       root: fs.root
     }
+  end
+
+  defp subpath?(source, destination) do
+    source = Tuple.pack(source)
+    destination = Tuple.pack(destination)
+
+    case destination do
+      <<^source::binary, _::binary>> -> true
+      _ -> false
+    end
   end
 end

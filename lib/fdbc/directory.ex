@@ -310,9 +310,19 @@ defmodule FDBC.Directory do
     source = path_to_tuple(source)
     destination = path_to_tuple(destination)
 
-    FDBC.transact(db_or_tr, fn tr ->
-      FileSystem.move_directory(dir.file_system, tr, source, destination, opts)
-    end)
+    if source == [] do
+      {:error, "the current working directory cannot be moved while active"}
+    else
+      FDBC.transact(db_or_tr, fn tr ->
+        FileSystem.root(dir.file_system)
+        |> FileSystem.move_directory(
+          tr,
+          dir.file_system.path ++ source,
+          dir.file_system.path ++ destination,
+          opts
+        )
+      end)
+    end
   end
 
   @doc """
@@ -337,37 +347,27 @@ defmodule FDBC.Directory do
   """
   @spec open(t, Database.t() | Transaction.t(), [String.t()], keyword) ::
           {:ok, t} | {:error, term}
-  def open(dir, db_or_tr, path, opts \\ [])
-
-  def open(%__MODULE__{} = dir, _db_or_tr, [], opts) do
-    if dir.file_system.path == [] do
-      if dir.file_system.root == nil do
+  def open(%__MODULE__{} = directory, db_or_tr, path, opts \\ []) do
+    if path == [] && directory.file_system.path == [] do
+      if directory.file_system.root == nil do
         raise ArgumentError, "cannot open the root directory"
-      end
-
-      if Keyword.get(opts, :create) do
-        raise ArgumentError, "cannot create directory as no path was provided"
       end
     end
 
-    {:ok, dir}
-  end
-
-  def open(%__MODULE__{} = dir, db_or_tr, path, opts) do
     prefix = Keyword.get(opts, :prefix, nil)
 
-    if prefix && !dir.allow_manual_prefixes do
+    if prefix && !directory.allow_manual_prefixes do
       raise ArgumentError, "cannot specify a prefix unless manual prefixes are enabled"
     end
 
     path = path_to_tuple(path)
 
     FDBC.transact(db_or_tr, fn tr ->
-      path = dir.file_system.path ++ path
+      path = directory.file_system.path ++ path
 
       with {:ok, file_system} <-
-             FileSystem.root(dir.file_system) |> FileSystem.change_directory(tr, path, opts) do
-        {:ok, %__MODULE__{dir | file_system: file_system}}
+             FileSystem.root(directory.file_system) |> FileSystem.change_directory(tr, path, opts) do
+        {:ok, %__MODULE__{directory | file_system: file_system}}
       end
     end)
   end
@@ -406,7 +406,8 @@ defmodule FDBC.Directory do
     path = path_to_tuple(path)
 
     FDBC.transact(db_or_tr, fn tr ->
-      FileSystem.remove_directory(dir.file_system, tr, path)
+      FileSystem.root(dir.file_system)
+      |> FileSystem.remove_directory(tr, dir.file_system.path ++ path)
     end)
   end
 
