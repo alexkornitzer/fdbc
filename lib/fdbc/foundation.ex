@@ -121,7 +121,7 @@ defmodule FDBC.Foundation do
         db = FDBC.Database.create(cluster_file, @options)
 
         FDBC.transact(db, fn tr ->
-          :ok = FDBC.Directory.new() |> FDBC.Directory.create(tr, path)
+          _ = FDBC.Directory.new() |> FDBC.Directory.open!(tr, path, create: true)
         end)
 
         :ok = :persistent_term.put(:db, {db, path})
