@@ -1,0 +1,15 @@
+diff --git a/flow/CMakeLists.txt b/flow/CMakeLists.txt
+index 16cb78b58..fcc3ae77b 100644
+--- a/flow/CMakeLists.txt
++++ b/flow/CMakeLists.txt
+@@ -135,6 +135,10 @@ foreach(ft flow flow_sampling flowlinktest)
+         target_link_libraries(${ft} PUBLIC Valgrind)
+     endif()
+
++    if(APPLE)
++      find_package(ZLIB)
++      target_link_libraries(${ft} PUBLIC ZLIB::ZLIB)
++    endif()
+     target_link_libraries(${ft} PUBLIC OpenSSL::SSL)
+     target_link_libraries(${ft} PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+     target_link_libraries(${ft} PUBLIC boost_target)

@@ -1,15 +1,16 @@
 /priv/lib
+fdb.cluster
 
 # Elixir
+*.ez
+/.fetch
 /_build/
 /cover/
 /deps/
 /doc/
-/.fetch
-erl_crash.dump
-*.ez
-fdb-*.tar
 /tmp/
+erl_crash.dump
+fdb-*.tar
 
 # Vim
 *.sw*

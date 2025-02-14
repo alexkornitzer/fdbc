@@ -2,28 +2,8 @@
 #
 # https://github.com/apple/foundationdb/blob/main/bindings/bindingtester
 #
-# This can be run by adding the tester.exs to the upstream `known_testers.py` file:
-#
-# ```diff
-# diff --git a/bindings/bindingtester/known_testers.py b/bindings/bindingtester/known_testers.py
-# index e7e5f99ed..808f7d31c 100644
-# --- a/bindings/bindingtester/known_testers.py
-# +++ b/bindings/bindingtester/known_testers.py
-# @@ -130,4 +130,13 @@ testers = {
-#          MAX_API_VERSION,
-#          directory_snapshot_ops_enabled=False,
-#      ),
-# +    "elixir": Tester(
-# +        "elixir",
-# +        "mix run test/tester.exs",
-# +        2040,
-# +        700,
-# +        MAX_API_VERSION,
-# +        types=ALL_TYPES,
-# +        tenants_enabled=True,
-# +    ),
-#  }
-# ```
+# This can be run by applying the patch set `bindingtester.patch` and running
+# then running the `run_tester_loop.sh`.
 
 defmodule Stack do
   alias FDBC.Future

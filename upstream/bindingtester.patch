@@ -1,0 +1,73 @@
+diff --git a/bindings/bindingtester/known_testers.py b/bindings/bindingtester/known_testers.py
+index e7e5f99ed..21608c65c 100644
+--- a/bindings/bindingtester/known_testers.py
++++ b/bindings/bindingtester/known_testers.py
+@@ -130,4 +130,13 @@ testers = {
+         MAX_API_VERSION,
+         directory_snapshot_ops_enabled=False,
+     ),
++    "elixir": Tester(
++        "elixir",
++        "mix run ./test/tester.exs",
++        2040,
++        700,
++        MAX_API_VERSION,
++        types=ALL_TYPES,
++        tenants_enabled=True,
++    ),
+ }
+diff --git a/bindings/bindingtester/run_tester_loop.sh b/bindings/bindingtester/run_tester_loop.sh
+index ec4ee68c0..04ec3204f 100755
+--- a/bindings/bindingtester/run_tester_loop.sh
++++ b/bindings/bindingtester/run_tester_loop.sh
+@@ -1,30 +1,27 @@
+ #!/usr/bin/env bash
+
++BINDINGTESTER_DIR=`dirname $0`
++FDB_CLUSTER=fdb.cluster
+ LOGGING_LEVEL=WARNING
+
+ function run() {
+ 	echo "Running $1 api"
+-	./bindingtester.py $1 --test-name api --cluster-file fdb.cluster --compare --num-ops 1000 --logging-level $LOGGING_LEVEL
++	python $BINDINGTESTER_DIR/bindingtester.py $1 --test-name api --cluster-file $FDB_CLUSTER --compare --num-ops 1000 --logging-level $LOGGING_LEVEL
+ 	echo "Running $1 concurrent api"
+-	./bindingtester.py $1 --test-name api --cluster-file fdb.cluster --num-ops 1000 --concurrency 5 --logging-level $LOGGING_LEVEL
++	python $BINDINGTESTER_DIR/bindingtester.py $1 --test-name api --cluster-file $FDB_CLUSTER --num-ops 1000 --concurrency 5 --logging-level $LOGGING_LEVEL
+ 	echo "Running $1 directory"
+-	./bindingtester.py $1 --test-name directory --cluster-file fdb.cluster --compare --num-ops 1000 --logging-level $LOGGING_LEVEL
++	python $BINDINGTESTER_DIR/bindingtester.py $1 --test-name directory --cluster-file $FDB_CLUSTER --compare --num-ops 1000 --logging-level $LOGGING_LEVEL
+ 	echo "Running $1 directory hca"
+-	./bindingtester.py $1 --test-name directory_hca --cluster-file fdb.cluster --num-ops 100 --concurrency 5 --logging-level $LOGGING_LEVEL
++	python $BINDINGTESTER_DIR/bindingtester.py $1 --test-name directory_hca --cluster-file $FDB_CLUSTER --num-ops 100 --concurrency 5 --logging-level $LOGGING_LEVEL
+ }
+
+ function scripted() {
+ 	echo "Running $1 scripted"
+-	./bindingtester.py $1 --test-name scripted --cluster-file fdb.cluster --logging-level $LOGGING_LEVEL
++	python $BINDINGTESTER_DIR/bindingtester.py $1 --test-name scripted --cluster-file $FDB_CLUSTER --logging-level $LOGGING_LEVEL
+ }
+
+ function run_scripted() {
+-	scripted python
+-	scripted ruby
+-	scripted java
+-	scripted java_async
+-	scripted go
+-	scripted flow
++	scripted elixir
+ }
+
+ run_scripted
+@@ -33,10 +30,5 @@ i=1
+ while `true`; do
+ 	echo "Pass $i"
+ 	i=$((i+1))
+-	run python
+-	run ruby
+-	run java
+-	run java_async
+-	run go
+-	run flow
++	run elixir
+ done
