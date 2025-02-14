@@ -539,7 +539,8 @@ defmodule Machine do
       case item do
         <<0::1, 0xFF::8, 0::23>> -> :infinity
         <<1::1, 0xFF::8, 0::23>> -> :neg_infinity
-        <<_::1, 0xFF::8, _::23>> -> :nan
+        <<0::1, 0xFF::8, _::23>> -> :nan
+        <<1::1, 0xFF::8, _::23>> -> :neg_nan
         <<item::float-big-32>> -> item
       end
 
@@ -553,7 +554,8 @@ defmodule Machine do
       case item do
         <<0::1, 0x7FF::11, 0::52>> -> :infinity
         <<1::1, 0x7FF::11, 0::52>> -> :neg_infinity
-        <<_::1, 0x7FF::11, _::52>> -> :nan
+        <<0::1, 0x7FF::11, _::52>> -> :nan
+        <<1::1, 0x7FF::11, _::52>> -> :neg_nan
         <<item::float-big-64>> -> item
       end
 
@@ -568,6 +570,7 @@ defmodule Machine do
         :infinity -> <<0::1, 0xFF::8, 0::1, 0::22>>
         :neg_infinity -> <<1::1, 0xFF::8, 0::1, 0::22>>
         :nan -> <<0::1, 0xFF::8, 1::1, 0::22>>
+        :neg_nan -> <<1::1, 0xFF::8, 1::1, 0::22>>
         _ -> <<item::float-big-32>>
       end
 
@@ -582,6 +585,7 @@ defmodule Machine do
         :infinity -> <<0::1, 0x7FF::11, 0::1, 0::51>>
         :neg_infinity -> <<1::1, 0x7FF::11, 0::1, 0::51>>
         :nan -> <<0::1, 0x7FF::11, 1::1, 0::51>>
+        :neg_nan -> <<1::1, 0x7FF::11, 1::1, 0::51>>
         _ -> <<item::float-big-64>>
       end
 
