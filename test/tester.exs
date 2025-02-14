@@ -1196,8 +1196,21 @@ defmodule Machine do
       id,
       stack,
       fn ->
-        :ok = Directory.move!(directory, db_or_tr, old_path, new_path)
-        {:ok, dir} = Directory.open(directory, db_or_tr, new_path)
+        dir =
+          case old_path do
+            [] ->
+              root = Directory.new(partition: directory.file_system.partition)
+              path = Directory.path(directory)
+              :ok = Directory.move!(root, db_or_tr, path ++ old_path, path ++ new_path)
+              {:ok, dir} = Directory.open(root, db_or_tr, path ++ new_path)
+              dir
+
+            old_path ->
+              :ok = Directory.move!(directory, db_or_tr, old_path, new_path)
+              {:ok, dir} = Directory.open(directory, db_or_tr, new_path)
+              dir
+          end
+
         %{machine | directories: machine.directories ++ [dir], stack: stack}
       end,
       true
@@ -1271,7 +1284,7 @@ defmodule Machine do
             partition: partition
           )
 
-        if label != dir.file_system.label do
+        if label != "" && label != dir.file_system.label do
           raise ArgumentError, "provided label does not match that of the directory"
         end
 
