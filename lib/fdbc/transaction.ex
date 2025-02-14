@@ -1501,12 +1501,7 @@ defmodule FDBC.Transaction do
   @doc false
   def increment_key(key) when is_binary(key) do
     size = byte_size(key)
-
-    {key, size} =
-      case key do
-        <<key::binary-size(^size - 1), 0xFF>> -> {key, size - 1}
-        _ -> {key, size}
-      end
+    {key, size} = trim_suffix(key, size)
 
     if size == 0 do
       raise "key must contain at least one byte not equal to 0xFF"
@@ -1514,6 +1509,13 @@ defmodule FDBC.Transaction do
 
     <<x::binary-size(^size - 1), y>> = key
     <<x::binary, y + 1>>
+  end
+
+  defp trim_suffix(key, size) do
+    case key do
+      <<key::binary-size(^size - 1), 0xFF>> -> trim_suffix(key, size - 1)
+      _ -> {key, size}
+    end
   end
 
   defp set_option(resource, :causal_write_risky, true) do

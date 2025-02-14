@@ -616,7 +616,7 @@ defmodule FDBC.Tuple do
     state =
       if Versionstamp.incomplete?(data) do
         key = Keyword.fetch!(opts, :prefix)
-        [versionstamp: <<byte_size(key) + 1::integer-little-32>>]
+        state ++ [versionstamp: <<byte_size(key) + 1::integer-little-32>>]
       else
         state
       end

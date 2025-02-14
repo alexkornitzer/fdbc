@@ -320,7 +320,7 @@ defmodule FDBC.Directory.FileSystem do
     prefix = fs.partition.metadata.key
 
     case key do
-      <<^prefix, _>> ->
+      <<^prefix::binary, _::binary>> ->
         partition_node(fs.partition)
 
       _ ->
@@ -347,7 +347,7 @@ defmodule FDBC.Directory.FileSystem do
   defp prefix_available?(%__MODULE__{} = fs, %Transaction{} = tr, prefix, opts \\ []) do
     snapshot = Keyword.get(opts, :snapshot, false)
 
-    prefix && !node_containing_key(fs, tr, prefix, snapshot) &&
+    prefix && prefix != <<>> && !node_containing_key(fs, tr, prefix, snapshot) &&
       Transaction.get_starts_with(
         tr,
         Subspace.pack(fs.partition.metadata, [prefix]),
