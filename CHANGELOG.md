@@ -1,6 +1,13 @@
 # Changelog
 
 
+## v0.1.2 (2025-02-14)
+
+### Fixes
+
+    * stop `FDBC.Foundation` from erroring when a directory already exists
+
+
 ## v0.1.1 (2025-02-14)
 
 ### Enhancements
