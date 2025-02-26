@@ -49,6 +49,7 @@ defmodule FDB.MixProject do
 
   def application do
     [
+      # Dev
       extra_applications: [:logger],
       mod: {FDBC.Application, []}
     ]
@@ -56,6 +57,7 @@ defmodule FDB.MixProject do
 
   defp deps do
     [
+      {:benchee, "~> 1.0", only: :dev},
       {:ex_doc, "~> 0.36", only: :dev, runtime: false}
     ]
   end
