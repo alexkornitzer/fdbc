@@ -214,6 +214,7 @@ defmodule FDBC.Tuple do
   @escape_typecode 0xFF
 
   @hex_chars [
+    ?0,
     ?1,
     ?2,
     ?3,
