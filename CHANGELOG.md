@@ -1,6 +1,20 @@
 # Changelog
 
 
+## v0.1.4 (2025-03-15)
+
+### Fixes
+
+    * tuple encode failed for UUID type due to missing character
+
+
+## v0.1.3 (2025-02-14)
+
+### Fixes
+
+    * numerous fixes highlighted from lots of bindingtester rounds
+
+
 ## v0.1.2 (2025-02-14)
 
 ### Fixes
