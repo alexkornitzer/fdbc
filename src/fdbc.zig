@@ -28,7 +28,7 @@ fn handleResult(env: ?*erl.ErlNifEnv, code: c_int) erl.ERL_NIF_TERM {
     return handleError(env, code);
 }
 
-fn selectApiVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn selectApiVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var runtime_version: c_int = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -39,7 +39,7 @@ fn selectApiVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_N
     return handleResult(env, fdb.fdb_select_api_version_impl(runtime_version, FDB_API_VERSION));
 }
 
-fn getMaxApiVersion(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn getMaxApiVersion(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     if (argc != 0) {
         return erl.enif_make_badarg(env);
     }
@@ -47,7 +47,7 @@ fn getMaxApiVersion(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_
     return erl.enif_make_int(env, max_api_version);
 }
 
-fn networkSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn networkSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var option: fdb.FDBNetworkOption = undefined;
     var value: ?*u8 = undefined;
     var value_length: c_int = undefined;
@@ -68,7 +68,7 @@ fn networkSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_N
     return handleResult(env, fdb.fdb_network_set_option(option, value, value_length));
 }
 
-fn setupNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn setupNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     if (argc != 0) {
         return erl.enif_make_badarg(env);
     }
@@ -80,13 +80,13 @@ const State = struct {
     var network_tid: ?*erl.ErlNifTid = null;
 };
 
-fn networkFunc(err_ptr: ?*anyopaque) callconv(.C) ?*anyopaque {
+fn networkFunc(err_ptr: ?*anyopaque) callconv(.c) ?*anyopaque {
     const err = @as(*c_int, @ptrCast(@alignCast(err_ptr.?)));
     err.* = fdb.fdb_run_network();
     return null;
 }
 
-fn runNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn runNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     const name = @constCast("fdb".ptr);
     if (argc != 0) {
         return erl.enif_make_badarg(env);
@@ -104,7 +104,7 @@ fn runNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) 
     return Atoms.OK;
 }
 
-fn stopNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn stopNetwork(env: ?*erl.ErlNifEnv, argc: c_int, _: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     if (argc != 0) {
         return erl.enif_make_badarg(env);
     }
@@ -273,7 +273,7 @@ const Callback = struct {
     future: *Future,
 };
 
-fn futureCallback(future: ?*fdb.FDBFuture, arg: ?*anyopaque) callconv(.C) void {
+fn futureCallback(future: ?*fdb.FDBFuture, arg: ?*anyopaque) callconv(.c) void {
     const callback = @as(?*Callback, @ptrCast(@alignCast(arg)));
     defer erl.enif_free(callback);
     defer erl.enif_free_env(callback.?.env);
@@ -290,7 +290,7 @@ fn futureCallback(future: ?*fdb.FDBFuture, arg: ?*anyopaque) callconv(.C) void {
     return;
 }
 
-fn futureResolve(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn futureResolve(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var future: *Future = undefined;
     if (argc != 2) {
         return erl.enif_make_badarg(env);
@@ -320,7 +320,7 @@ fn futureResolve(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_
     return handleResult(env, err);
 }
 
-fn futureCancel(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn futureCancel(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var future: ?*Future = null;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -332,7 +332,7 @@ fn futureCancel(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_T
     return Atoms.OK;
 }
 
-fn futureIsReady(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn futureIsReady(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var future: ?*Future = null;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -344,7 +344,7 @@ fn futureIsReady(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_
     return handleResult(env, err);
 }
 
-fn createDatabase(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn createDatabase(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var cluster_file_path: ?[*:0]u8 = null;
     defer if (cluster_file_path) |path| erl.enif_free(path);
     var path_bin: erl.ErlNifBinary = undefined;
@@ -371,7 +371,7 @@ fn createDatabase(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF
     return erl.enif_make_tuple2(env, Atoms.OK, term);
 }
 
-fn databaseSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     var option: fdb.FDBDatabaseOption = undefined;
     var value: ?*u8 = null;
@@ -397,7 +397,7 @@ fn databaseSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_
     return handleResult(env, err);
 }
 
-fn databaseOpenTenant(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseOpenTenant(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     var tenant: ?*fdb.FDBTenant = null;
     var tenant_name: ?*u8 = null;
@@ -425,7 +425,7 @@ fn databaseOpenTenant(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL
     return erl.enif_make_tuple2(env, Atoms.OK, term);
 }
 
-fn databaseCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     var transaction: ?*fdb.FDBTransaction = null;
     if (argc != 1) {
@@ -447,7 +447,7 @@ fn databaseCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const 
     return erl.enif_make_tuple2(env, Atoms.OK, term);
 }
 
-fn databaseRebootWorker(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseRebootWorker(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     var address: ?*u8 = null;
     var address_length: c_int = 0;
@@ -482,7 +482,7 @@ fn databaseRebootWorker(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.E
     return term;
 }
 
-fn databaseForceRecoveryWithDataLoss(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseForceRecoveryWithDataLoss(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     var dc_id: ?*u8 = null;
     var dc_id_length: c_int = 0;
@@ -509,7 +509,7 @@ fn databaseForceRecoveryWithDataLoss(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*
     return term;
 }
 
-fn databaseCreateSnapshot(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseCreateSnapshot(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     var uid: ?*u8 = null;
     var uid_length: c_int = 0;
@@ -544,7 +544,7 @@ fn databaseCreateSnapshot(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl
     return term;
 }
 
-fn databaseGetMainThreadBusyness(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseGetMainThreadBusyness(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -556,7 +556,7 @@ fn databaseGetMainThreadBusyness(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]co
     return erl.enif_make_double(env, double);
 }
 
-fn databaseGetClientStatus(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn databaseGetClientStatus(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var database: **fdb.FDBDatabase = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -575,7 +575,7 @@ fn databaseGetClientStatus(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const er
     return term;
 }
 
-fn tenantCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn tenantCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var tenant: **fdb.FDBTenant = undefined;
     var transaction: ?*fdb.FDBTransaction = null;
     if (argc != 1) {
@@ -597,7 +597,7 @@ fn tenantCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const er
     return erl.enif_make_tuple2(env, Atoms.OK, term);
 }
 
-fn tenantGetId(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn tenantGetId(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var tenant: **fdb.FDBTenant = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -621,7 +621,7 @@ const Transaction = struct {
     resource: ?*anyopaque,
 };
 
-fn transactionSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var option: fdb.FDBTransactionOption = undefined;
     var value: ?*u8 = null;
@@ -647,7 +647,7 @@ fn transactionSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.E
     return handleResult(env, err);
 }
 
-fn transactionSetReadVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionSetReadVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var version: i64 = undefined;
     if (argc != 2) {
@@ -663,7 +663,7 @@ fn transactionSetReadVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const 
     return Atoms.OK;
 }
 
-fn transactionGetReadVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetReadVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -682,7 +682,7 @@ fn transactionGetReadVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const 
     return term;
 }
 
-fn transactionGet(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGet(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var key_name: ?*u8 = null;
     var key_name_length: c_int = 0;
@@ -713,7 +713,7 @@ fn transactionGet(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF
     return term;
 }
 
-fn transactionGetEstimatedRangeSizeBytes(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetEstimatedRangeSizeBytes(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var begin_key_name: ?*u8 = null;
     var begin_key_name_length: c_int = 0;
@@ -748,7 +748,7 @@ fn transactionGetEstimatedRangeSizeBytes(env: ?*erl.ErlNifEnv, argc: c_int, argv
     return term;
 }
 
-fn transactionGetRangeSplitPoints(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetRangeSplitPoints(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var begin_key_name: ?*u8 = null;
     var begin_key_name_length: c_int = 0;
@@ -787,7 +787,7 @@ fn transactionGetRangeSplitPoints(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]c
     return term;
 }
 
-fn transactionGetKey(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetKey(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var key_name: ?*u8 = null;
     var key_name_length: c_int = 0;
@@ -826,7 +826,7 @@ fn transactionGetKey(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_
     return term;
 }
 
-fn transactionGetAddressesForKey(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetAddressesForKey(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var key_name: ?*u8 = null;
     var key_name_length: c_int = 0;
@@ -853,7 +853,7 @@ fn transactionGetAddressesForKey(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]co
     return term;
 }
 
-fn transactionGetRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var begin_key_name: ?*u8 = null;
     var begin_key_name_length: c_int = 0;
@@ -928,7 +928,7 @@ fn transactionGetRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ER
     return term;
 }
 
-fn transactionSet(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionSet(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var key_name: ?*u8 = null;
     var key_name_length: c_int = 0;
@@ -956,7 +956,7 @@ fn transactionSet(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF
     return Atoms.OK;
 }
 
-fn transactionClear(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionClear(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var key_name: ?*u8 = null;
     var key_name_length: c_int = 0;
@@ -976,7 +976,7 @@ fn transactionClear(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_N
     return Atoms.OK;
 }
 
-fn transactionClearRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionClearRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var begin_key_name: ?*u8 = null;
     var begin_key_name_length: c_int = 0;
@@ -1004,7 +1004,7 @@ fn transactionClearRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.
     return Atoms.OK;
 }
 
-fn transactionAtomicOp(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionAtomicOp(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var key_name: ?*u8 = null;
     var key_name_length: c_int = 0;
@@ -1036,7 +1036,7 @@ fn transactionAtomicOp(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ER
     return Atoms.OK;
 }
 
-fn transactionCommit(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionCommit(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -1055,7 +1055,7 @@ fn transactionCommit(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_
     return term;
 }
 
-fn transactionGetCommittedVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetCommittedVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var version: i64 = undefined;
     if (argc != 1) {
@@ -1071,7 +1071,7 @@ fn transactionGetCommittedVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]c
     return erl.enif_make_tuple2(env, Atoms.OK, erl.enif_make_int64(env, version));
 }
 
-fn transactionGetTagThrottledDuration(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetTagThrottledDuration(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -1090,7 +1090,7 @@ fn transactionGetTagThrottledDuration(env: ?*erl.ErlNifEnv, argc: c_int, argv: [
     return term;
 }
 
-fn transactionGetTotalCost(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetTotalCost(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -1109,7 +1109,7 @@ fn transactionGetTotalCost(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const er
     return term;
 }
 
-fn transactionGetApproximateSize(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetApproximateSize(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -1128,7 +1128,7 @@ fn transactionGetApproximateSize(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]co
     return term;
 }
 
-fn transactionGetVersionstamp(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionGetVersionstamp(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -1147,7 +1147,7 @@ fn transactionGetVersionstamp(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const
     return term;
 }
 
-fn transactionWatch(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionWatch(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var key_name: ?*u8 = null;
     var key_name_length: c_int = 0;
@@ -1173,7 +1173,7 @@ fn transactionWatch(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_N
     return term;
 }
 
-fn transactionOnError(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionOnError(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var err: c_int = undefined;
     if (argc != 2) {
@@ -1196,7 +1196,7 @@ fn transactionOnError(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL
     return term;
 }
 
-fn transactionReset(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionReset(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -1208,7 +1208,7 @@ fn transactionReset(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_N
     return Atoms.OK;
 }
 
-fn transactionCancel(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionCancel(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
         return erl.enif_make_badarg(env);
@@ -1220,7 +1220,7 @@ fn transactionCancel(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_
     return Atoms.OK;
 }
 
-fn transactionAddConflictRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.C) erl.ERL_NIF_TERM {
+fn transactionAddConflictRange(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     var begin_key_name: ?*u8 = null;
     var begin_key_name_length: c_int = 0;
@@ -1267,12 +1267,12 @@ const Resources = struct {
     var TRANSACTION: ?*erl.ErlNifResourceType = null;
 };
 
-fn database_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.C) void {
+fn database_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.c) void {
     const db: **fdb.FDBDatabase = @ptrCast(@alignCast(res));
     fdb.fdb_database_destroy(db.*);
 }
 
-fn future_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.C) void {
+fn future_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.c) void {
     const future: *Future = @ptrCast(@alignCast(res));
     fdb.fdb_future_destroy(future.handle);
     if (future.resource != null) {
@@ -1280,12 +1280,12 @@ fn future_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.C) void {
     }
 }
 
-fn tenant_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.C) void {
+fn tenant_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.c) void {
     const tenant: **fdb.FDBTenant = @ptrCast(@alignCast(res));
     fdb.fdb_tenant_destroy(tenant.*);
 }
 
-fn transaction_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.C) void {
+fn transaction_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.c) void {
     const transaction: *Transaction = @ptrCast(@alignCast(res));
     fdb.fdb_transaction_destroy(transaction.handle);
     if (transaction.resource != null) {
@@ -1293,7 +1293,7 @@ fn transaction_destructor(_: ?*erl.ErlNifEnv, res: ?*anyopaque) callconv(.C) voi
     }
 }
 
-fn load(env: ?*erl.ErlNifEnv, _: [*c]?*anyopaque, _: erl.ERL_NIF_TERM) callconv(.C) c_int {
+fn load(env: ?*erl.ErlNifEnv, _: [*c]?*anyopaque, _: erl.ERL_NIF_TERM) callconv(.c) c_int {
     Atoms.ENOMEM = erl.enif_make_atom(env, "enomem");
     Atoms.ERROR = erl.enif_make_atom(env, "error");
     Atoms.NIL = erl.enif_make_atom(env, "nil");
