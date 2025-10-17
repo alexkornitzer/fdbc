@@ -3,6 +3,7 @@ fdb.cluster
 
 # Elixir
 *.ez
+.expert/
 /.fetch
 /_build/
 /cover/
