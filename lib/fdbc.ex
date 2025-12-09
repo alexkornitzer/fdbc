@@ -97,23 +97,30 @@ defmodule FDBC do
 
   The options are used for creating the transaction and therefore are the same
   as those for `FDBC.Transaction.create/2`.
+
+  In addition to the above options a boolean option `commit` can be set to
+  control whether transact applies the commit or not. Setting this to `false`
+  can be useful when additional work within the scoped function is required
+  such as requesting the versionstamp.
   """
   @spec transact(Database.t() | Transaction.t(), (Transaction.t() -> any), keyword()) :: any
   def transact(database_or_transaction, fun, opts \\ [])
 
   def transact(%Database{} = database, fun, opts) do
-    Transaction.create(database, opts) |> do_transact(fun)
+    {commit, opts} = Keyword.pop(opts, :commit, true)
+    Transaction.create(database, opts) |> do_transact(fun, commit)
   end
 
   def transact(%Tenant{} = tenant, fun, opts) do
-    Transaction.create(tenant, opts) |> do_transact(fun)
+    {commit, opts} = Keyword.pop(opts, :commit, true)
+    Transaction.create(tenant, opts) |> do_transact(fun, commit)
   end
 
   def transact(%Transaction{} = tr, fun, _opts), do: fun.(tr)
 
-  defp do_transact(%Transaction{} = transaction, fun) do
+  defp do_transact(%Transaction{} = transaction, fun, commit) do
     result = fun.(transaction)
-    :ok = Transaction.commit(transaction)
+    :ok = if commit, do: Transaction.commit(transaction), else: :ok
     result
   rescue
     e in FDBC.Error ->
@@ -123,6 +130,6 @@ defmodule FDBC do
         :ok
       end
 
-      do_transact(transaction, fun)
+      do_transact(transaction, fun, commit)
   end
 end
