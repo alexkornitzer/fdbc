@@ -1,6 +1,13 @@
 # Changelog
 
 
+## v0.1.6 (2025-12-09)
+
+### Enhancements
+
+    * add the option to disable commit within transact
+
+
 ## v0.1.5 (2025-10-17)
 
 ### Fixes
