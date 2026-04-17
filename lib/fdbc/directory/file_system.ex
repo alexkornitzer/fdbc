@@ -272,11 +272,11 @@ defmodule FDBC.Directory.FileSystem do
       case @version do
         {x, _, _} when major > x ->
           {:error,
-           "cannot load directory with version #{{major, minor, patch}} using directory layer #{@version}"}
+           "cannot load directory with version #{inspect({major, minor, patch})} using directory layer #{inspect(@version)}"}
 
         {_, y, _} when minor > y and not read_only ->
           {:error,
-           "directory with version #{{major, minor, patch}} is read-only when opened using directory layer #{@version}"}
+           "directory with version #{inspect({major, minor, patch})} is read-only when opened using directory layer #{inspect(@version)}"}
 
         _ ->
           :ok
