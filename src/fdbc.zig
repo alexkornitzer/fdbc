@@ -1,9 +1,6 @@
 const std = @import("std");
 
-const erl = @cImport({
-    @cInclude("erl_nif.h");
-    @cInclude("erl_driver.h");
-});
+const erl = @import("erl");
 
 const FDB_API_VERSION = 740;
 
@@ -196,9 +193,9 @@ const Future = struct {
     }
 
     fn getKey(self: *Future, env: ?*erl.ErlNifEnv) erl.ERL_NIF_TERM {
-        var key: ?[*]u8 = null;
+        var key: ?[*]const u8 = null;
         var key_length: c_int = 0;
-        const err: c_int = fdb.fdb_future_get_key(self.handle, @ptrCast(&key), &key_length);
+        const err: c_int = fdb.fdb_future_get_key(self.handle, &key, &key_length);
         if (err != 0) {
             return handleError(env, err);
         }
@@ -208,9 +205,9 @@ const Future = struct {
 
     fn getValue(self: *Future, env: ?*erl.ErlNifEnv) erl.ERL_NIF_TERM {
         var present: fdb.fdb_bool_t = undefined;
-        var value: ?[*]u8 = null;
+        var value: ?[*]const u8 = null;
         var value_length: c_int = 0;
-        const err: c_int = fdb.fdb_future_get_value(self.handle, &present, @ptrCast(&value), &value_length);
+        const err: c_int = fdb.fdb_future_get_value(self.handle, &present, &value, &value_length);
         if (err != 0) {
             return handleError(env, err);
         }
@@ -222,7 +219,7 @@ const Future = struct {
     }
 
     fn getStringArray(self: *Future, env: ?*erl.ErlNifEnv) erl.ERL_NIF_TERM {
-        var strings: ?[*][*c]u8 = null;
+        var strings: ?[*][*c]const u8 = null;
         var count: c_int = 0;
         const err: c_int = fdb.fdb_future_get_string_array(self.handle, &strings, &count);
         if (err != 0) {
@@ -231,7 +228,7 @@ const Future = struct {
         var list = erl.enif_make_list(env, 0);
         var i: usize = 0;
         while (i < count) : (i += 1) {
-            const string: [*c]u8 = strings.?[i];
+            const string: [*c]const u8 = strings.?[i];
             const term = erl.enif_make_resource_binary(env, self, string, @intCast(std.mem.len(string)));
             list = erl.enif_make_list_cell(env, term, list);
         }
