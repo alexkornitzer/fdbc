@@ -1,6 +1,13 @@
 # Changelog
 
 
+## v0.1.7 (2026-04-22)
+
+### Fixes
+
+    * make compatible with latest version of Zig
+
+
 ## v0.1.6 (2025-12-09)
 
 ### Enhancements
