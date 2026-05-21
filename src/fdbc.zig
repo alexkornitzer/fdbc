@@ -434,6 +434,7 @@ fn databaseCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const 
     const tx: *Transaction = @ptrCast(@alignCast(erl.enif_alloc_resource(Resources.TRANSACTION, @sizeOf(Transaction))));
     tx.handle = transaction.?;
     tx.resource = @ptrCast(database);
+    tx.user_version = 0;
     erl.enif_keep_resource(tx.resource);
     const term: erl.ERL_NIF_TERM = erl.enif_make_resource(env, @ptrCast(@alignCast(tx)));
     erl.enif_release_resource(@ptrCast(@alignCast(tx)));
@@ -584,6 +585,7 @@ fn tenantCreateTransaction(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const er
     const tx: *Transaction = @ptrCast(@alignCast(erl.enif_alloc_resource(Resources.TRANSACTION, @sizeOf(Transaction))));
     tx.handle = transaction.?;
     tx.resource = @ptrCast(tenant);
+    tx.user_version = 0;
     erl.enif_keep_resource(tx.resource);
     const term: erl.ERL_NIF_TERM = erl.enif_make_resource(env, @ptrCast(@alignCast(tx)));
     erl.enif_release_resource(@ptrCast(@alignCast(tx)));
@@ -612,6 +614,7 @@ fn tenantGetId(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TE
 const Transaction = struct {
     handle: *fdb.FDBTransaction,
     resource: ?*anyopaque,
+    user_version: u16,
 };
 
 fn transactionSetOption(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
@@ -1121,6 +1124,19 @@ fn transactionGetApproximateSize(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]co
     return term;
 }
 
+fn transactionGetUserVersion(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
+    var transaction: *Transaction = undefined;
+    if (argc != 1) {
+        return erl.enif_make_badarg(env);
+    }
+    if (erl.enif_get_resource(env, argv[0], Resources.TRANSACTION, @ptrCast(&transaction)) == 0) {
+        return erl.enif_make_badarg(env);
+    }
+    const term: erl.ERL_NIF_TERM = erl.enif_make_int(env, transaction.user_version);
+    transaction.user_version += 1;
+    return term;
+}
+
 fn transactionGetVersionstamp(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_NIF_TERM) callconv(.c) erl.ERL_NIF_TERM {
     var transaction: *Transaction = undefined;
     if (argc != 1) {
@@ -1178,6 +1194,7 @@ fn transactionOnError(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL
     if (erl.enif_get_int(env, argv[1], &err) == 0) {
         return erl.enif_make_badarg(env);
     }
+    transaction.user_version = 0;
     const future: ?*fdb.FDBFuture = fdb.fdb_transaction_on_error(transaction.handle, err);
     const ft: *Future = @ptrCast(@alignCast(erl.enif_alloc_resource(Resources.FUTURE, @sizeOf(Future))));
     ft.handle = future.?;
@@ -1197,6 +1214,7 @@ fn transactionReset(env: ?*erl.ErlNifEnv, argc: c_int, argv: [*c]const erl.ERL_N
     if (erl.enif_get_resource(env, argv[0], Resources.TRANSACTION, @ptrCast(&transaction)) == 0) {
         return erl.enif_make_badarg(env);
     }
+    transaction.user_version = 0;
     fdb.fdb_transaction_reset(transaction.handle);
     return Atoms.OK;
 }
@@ -1550,6 +1568,12 @@ var funcs = [_]erl.ErlNifFunc{
         .name = "transaction_get_approximate_size",
         .arity = 1,
         .fptr = transactionGetApproximateSize,
+        .flags = 0,
+    },
+    erl.ErlNifFunc{
+        .name = "transaction_get_user_version",
+        .arity = 1,
+        .fptr = transactionGetUserVersion,
         .flags = 0,
     },
     erl.ErlNifFunc{

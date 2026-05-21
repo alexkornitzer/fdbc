@@ -1188,6 +1188,19 @@ defmodule FDBC.Transaction do
   end
 
   @doc """
+  Returns a monotonically increasing user version.
+
+  This function is used to create monotonically increasing user versions for
+  use within `FDBC.Transaction.Versionstamp`. The version is globally scoped to
+  the transaction ensuring uniqueness across layers, thus if uniqueness across
+  layers is not desired then the layer must handle the version itself.
+  """
+  @spec get_user_version(t) :: integer
+  def get_user_version(%__MODULE__{resource: resource}) do
+    NIF.transaction_get_user_version(resource)
+  end
+
+  @doc """
   Returns a future that will resolve to the versionstamp used by the transaction.
 
   The underlying future will be ready only after the successful completion of a

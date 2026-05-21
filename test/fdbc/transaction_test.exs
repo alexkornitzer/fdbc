@@ -505,6 +505,31 @@ defmodule FDBC.TransactionTest do
     end
   end
 
+  describe "get_user_version/1" do
+    test "successfully gets user versions", context do
+      tr = Transaction.create(context.db)
+      assert 0 == Transaction.get_user_version(tr)
+      assert 1 == Transaction.get_user_version(tr)
+      assert 2 == Transaction.get_user_version(tr)
+    end
+
+    test "successfully resets on transaction error", context do
+      tr = Transaction.create(context.db)
+      assert 0 == Transaction.get_user_version(tr)
+      assert 1 == Transaction.get_user_version(tr)
+      FDBC.NIF.transaction_on_error(tr.resource, 1_000)
+      assert 0 == Transaction.get_user_version(tr)
+    end
+
+    test "successfully resets on transaction reset", context do
+      tr = Transaction.create(context.db)
+      assert 0 == Transaction.get_user_version(tr)
+      assert 1 == Transaction.get_user_version(tr)
+      :ok = Transaction.reset(tr)
+      assert 0 == Transaction.get_user_version(tr)
+    end
+  end
+
   describe "async_get_versionstamp/1" do
     test "successfully gets versionstamp", context do
       tr = Transaction.create(context.db)

@@ -187,6 +187,10 @@ defmodule FDBC.NIF do
     :erlang.nif_error("NIF transaction_get_approximate_size/1 not implemented")
   end
 
+  def transaction_get_user_version(_transaction) do
+    :erlang.nif_error("NIF transaction_get_user_version/1 not implemented")
+  end
+
   def transaction_get_versionstamp(_transaction) do
     :erlang.nif_error("NIF transaction_get_versionstamp/1 not implemented")
   end
