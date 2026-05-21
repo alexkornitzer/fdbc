@@ -1,13 +1,9 @@
 const std = @import("std");
 
 const erl = @import("erl");
+const fdb = @import("fdb");
 
 const FDB_API_VERSION = 740;
-
-const fdb = @cImport({
-    @cDefine("FDB_API_VERSION", "730");
-    @cInclude("foundationdb/fdb_c.h");
-});
 
 fn handleError(env: ?*erl.ErlNifEnv, code: c_int) erl.ERL_NIF_TERM {
     const reason = fdb.fdb_get_error(code);

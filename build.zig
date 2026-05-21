@@ -14,6 +14,14 @@ pub fn build(b: *std.Build) void {
 
     translate_erl.addIncludePath(.{ .cwd_relative = erts_include });
 
+    const translate_fdb = b.addTranslateC(.{
+        .root_source_file = b.path("src/fdb.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    translate_fdb.addIncludePath(.{ .cwd_relative = "/usr/local/include/" });
+
     const libnif = b.addLibrary(.{
         .linkage = .dynamic,
         .name = "fdbcnif",
@@ -26,13 +34,16 @@ pub fn build(b: *std.Build) void {
                     .name = "erl",
                     .module = translate_erl.createModule(),
                 },
+                .{
+                    .name = "fdb",
+                    .module = translate_fdb.createModule(),
+                },
             },
         }),
         .version = null,
     });
 
     libnif.linker_allow_shlib_undefined = true;
-    libnif.root_module.addIncludePath(.{ .cwd_relative = "/usr/local/include/" });
     libnif.root_module.addLibraryPath(.{ .cwd_relative = "/usr/local/lib/" });
     libnif.root_module.linkSystemLibrary("fdb_c", .{});
 
