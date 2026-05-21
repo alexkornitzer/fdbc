@@ -1,6 +1,13 @@
 # Changelog
 
 
+## v0.1.8 (2026-05-21)
+
+### Enhancements
+
+    * adds an optional user version counter to transactions
+
+
 ## v0.1.7 (2026-04-22)
 
 ### Fixes
