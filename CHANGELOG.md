@@ -3,6 +3,10 @@
 
 ## v0.1.9
 
+### Fixes
+
+    * don't silently error on compilation failure
+
 ### Tweaks
 
     * change `Transaction.get_metadata_version/1` to always return versionstamp

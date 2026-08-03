@@ -11,9 +11,17 @@ defmodule Mix.Tasks.Compile.Fdbc do
 
     config = Mix.Project.config()
     app_priv = Path.join(Mix.Project.app_path(config), "priv")
-    {result, errcode} = System.cmd("zig", ["build", mode, "-p", app_priv], stderr_to_stdout: true)
 
-    if match?({{:unix, :darwin}, 0}, {:os.type(), errcode}) do
+    result =
+      case System.cmd("zig", ["build", mode, "-p", app_priv], stderr_to_stdout: true) do
+        {result, 0} ->
+          result
+
+        {result, errcode} ->
+          Mix.raise(~s{Could not compile (exit status: #{errcode}).\n} <> result)
+      end
+
+    if match?({:unix, :darwin}, :os.type()) do
       lib = Path.join(app_priv, "lib/libfdbcnif.so")
       _ = :file.make_symlink("./libfdbcnif.dylib", lib)
     end
