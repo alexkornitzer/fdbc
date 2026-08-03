@@ -2,10 +2,8 @@ defmodule FDBC.NIF do
   @moduledoc false
   @on_load :load_nifs
 
-  @app Mix.Project.config()[:app]
-
   defp load_nifs do
-    path = :filename.join(:code.priv_dir(@app), ~c"lib/libfdbcnif")
+    path = :filename.join(:code.priv_dir(:fdbc), ~c"lib/libfdbcnif")
     :erlang.load_nif(path, 0)
   end
 
