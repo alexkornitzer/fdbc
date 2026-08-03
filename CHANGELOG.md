@@ -1,6 +1,13 @@
 # Changelog
 
 
+## v0.1.9
+
+### Tweaks
+
+    * change `Transaction.get_metadata_version/1` to always return versionstamp
+
+
 ## v0.1.8 (2026-05-21)
 
 ### Enhancements

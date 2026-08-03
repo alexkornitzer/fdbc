@@ -442,7 +442,7 @@ defmodule FDBC.TransactionTest do
   describe "get_metadata_version/1" do
     test "successfully gets metadata version", context do
       tr = Transaction.create(context.db)
-      assert nil == Transaction.get_metadata_version(tr)
+      assert <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0>> == Transaction.get_metadata_version(tr)
     end
   end
 

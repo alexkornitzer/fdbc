@@ -892,12 +892,10 @@ defmodule FDBC.Transaction do
   layers deal with hot keys. The value of this key is sent to clients along
   with the read version from the proxy, so a client can read its value without
   communicating with a storage server.
-
-  It is stored as a versionstamp, and can be `nil` if its yet to be utilised.
   """
-  @spec get_metadata_version(t) :: binary | nil
+  @spec get_metadata_version(t) :: binary
   def get_metadata_version(transaction) do
-    get(transaction, "\xff/metadataVersion")
+    get(transaction, "\xff/metadataVersion") || <<0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
   end
 
   @doc """
