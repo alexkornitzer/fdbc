@@ -298,8 +298,6 @@ defmodule FDBC.Directory.FileSystem do
     end
   end
 
-  defp fetch_parent(%__MODULE__{} = fs, %Transaction{}, [], _parents), do: {:ok, fs}
-
   defp fetch_parent(%__MODULE__{} = fs, %Transaction{} = tr, path, parents) do
     path = Enum.drop(path, -1)
     change_directory(fs, tr, path, create: parents, parents: parents)

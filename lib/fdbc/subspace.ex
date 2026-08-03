@@ -104,7 +104,7 @@ defmodule FDBC.Subspace do
 
     if Keyword.get(opts, :versionstamp) do
       size = byte_size(key) - 4
-      <<key::binary-size(size), offset::integer-little-32>> = key
+      <<key::binary-size(^size), offset::integer-little-32>> = key
       prefix <> key <> <<offset + byte_size(prefix)::integer-little-32>>
     else
       prefix <> key
