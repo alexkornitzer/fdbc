@@ -66,7 +66,8 @@ defmodule FDB.MixProject do
   defp deps do
     [
       {:benchee, "~> 1.0", only: :dev},
-      {:ex_doc, "~> 0.36", only: :dev, runtime: false}
+      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
     ]
   end
 
