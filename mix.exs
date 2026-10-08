@@ -38,7 +38,7 @@ defmodule FDB.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/alexkornitzer/fdbc"
-  @version "0.1.9"
+  @version "0.1.10"
 
   def project do
     [

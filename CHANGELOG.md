@@ -1,6 +1,13 @@
 # Changelog
 
 
+## v0.1.10 (2026-10-08)
+
+### Enhancements
+
+    * build: allow zig target to be set through `ZIG_TARGET`.
+
+
 ## v0.1.9 (2026-08-03)
 
 ### Fixes
