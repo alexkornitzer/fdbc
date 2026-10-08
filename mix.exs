@@ -9,11 +9,15 @@ defmodule Mix.Tasks.Compile.Fdbc do
         "--release=off"
       end
 
+    target = System.get_env("ZIG_TARGET", "native")
+
     config = Mix.Project.config()
     app_priv = Path.join(Mix.Project.app_path(config), "priv")
 
     result =
-      case System.cmd("zig", ["build", mode, "-p", app_priv], stderr_to_stdout: true) do
+      case System.cmd("zig", ["build", mode, "-Dtarget=#{target}", "-p", app_priv],
+             stderr_to_stdout: true
+           ) do
         {result, 0} ->
           result
 
